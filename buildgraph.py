@@ -3,6 +3,8 @@
 # ======================= Libraries
 import numpy as np
 from numpy.random import Generator
+from scipy.spatial.distance import pdist, squareform
+import numba
 
 
 # ======================= Functions
@@ -35,16 +37,23 @@ def norm_multi(x, y, p=2):
     return np.linalg.norm(x - reshaped, axis=0, ord=p)
 
 
-def local_connect(x, center, std: float):
+def local_connect_gaussian(x, center, std: float):
     """
     This is the gaussian function that return the probabilty to connect two nodes depending their distance.
     This function has to be fixed.
     """
-    assert std != 0, (
-        "No sense to have a standard deviation of zero for a probability distribution"
-    )
+    assert std != 0, "Diving by zero"
     var = std**2
     return np.exp(-(norm_multi(x, center) ** 2) / 2 / var)
+
+
+def local_connect_lorentz(x, center, gamma: float, order=2):
+    """
+    This is the long (heavy) tail function that return the probabilty to connect two nodes depending their distance.
+    This function has to be fixed with gamma>0.5 in order to have a heavier tail than the gaussian distribution with std=gamma.
+    """
+    assert gamma != 0, "Dividing by zero"
+    return 1 / (1 + (norm_multi(x, center, order) / gamma) ** order)
 
 
 def connexion_normal_random(
@@ -68,38 +77,75 @@ def connexion_normal_random(
         )  # the number of neighbours is always positive
         chosen_index = rng.choice(m, k_neighbours, replace=False)
         neighbours = pos[:, chosen_index]
-        distance_proba[chosen_index, i] = local_connect(neighbours, center, std)
+        distance_proba[chosen_index, i] = local_connect_gaussian(
+            neighbours, center, std
+        )
     # connectivity = np.sign(distance_proba-random_draw)
     connectivity = (distance_proba > random_draw).astype(int)
     np.fill_diagonal(connectivity, 0.0)
     return connectivity
 
-
-def connexion_normal_deterministic(
-    pos, rng: Generator, std: float, mean: float, std_draw: float
+@numba.jit(nopython=True)
+def connexion_normal_random_NUMBA(
+    pos, std: float, mean: float, std_draw: float, m: int
 ):
     """
-    Return the connectivity matrix of the final graph
+    Return the connectivity matrix of the final graph.
+    This version is accelerated with Numba.
+    
+    NOTE: Numba's nopython=True mode cannot use the `Generator` object (rng).
+    We must pass in `m` (the size) and use the standard `np.random.*` functions
+    inside, which Numba *can* compile.
     """
-    (n, m) = np.shape(pos)  # WARNING this code assume n=2
-    random_draw = rng.uniform(size=(m, m))
+    
+    # Numba requires a bit more explicit type handling
+    number_of_neighbours = np.random.normal(
+        mean, std_draw, m
+    )    
+    random_draw = np.random.uniform(0.0, 1.0, size=(m, m))
     distance_proba = np.zeros((m, m))
     for i in range(m):
         center = pos[:, i]
-        distance_proba[:, i] = local_connect(pos, center, std)
-    # connectivity = np.sign(distance_proba-random_draw)
+        k_neighbours = max(
+            0, int(number_of_neighbours[i])
+        )
+        if k_neighbours == 0:
+            continue
+        # Numba compatible way to do rng.choice(m, k, replace=False)
+        all_indices = np.arange(m)
+        np.random.shuffle(all_indices)
+        chosen_index = all_indices[:k_neighbours]
+        var = std**2
+        for idx in chosen_index:
+            neighbour = pos[:, idx]
+            # (n=2, but Numba can't know that from the shape)
+            dx = neighbour[0] - center[0]
+            dy = neighbour[1] - center[1]
+            dist_sq = dx**2 + dy**2
+            prob = np.exp(-dist_sq / (2 * var))
+            distance_proba[idx, i] = prob
+    connectivity = (distance_proba > random_draw).astype(np.int32)
+    for i in range(m):
+        connectivity[i, i] = 0
+    return connectivity
+
+
+def connexion_normal_deterministic(pos, rng: Generator, std: float):
+    """
+    Return the connectivity matrix of the final graph
+    """
+    (n, m) = np.shape(pos)
+    assert n == 2, "The entire code assumes the nodes are in a 2D space"
+    assert std != 0, "Diving by zero"
+    distances_matrix = squareform(pdist(pos.T, metric="euclidean"))
+    var = std**2
+    distance_proba = np.exp(-(distances_matrix**2) / (2 * var))
+    random_draw = rng.uniform(size=(m, m))
     connectivity = (distance_proba > random_draw).astype(int)
-    np.fill_diagonal(connectivity, 0.0)
+    np.fill_diagonal(connectivity, 0)
     return connectivity
 
 
 # ======================= Script
 if __name__ == "__main__":
-    N = 100
-    std = 1.0
-    mean = 0.0
-    (xmax, ymax) = (1.0, 1.0)
-    rng = np.random.default_rng(2356)
-    test_pos = pos_nodes_uniform(N, xmax, ymax, rng)
-    Adja = connexion_normal_random(test_pos, rng, std, 10, 1)
-    print(Adja)
+    print("Hello world!")
