@@ -44,33 +44,42 @@ def local_connect(x, center, std: float):
         "No sense to have a standard deviation of zero for a probability distribution"
     )
     var = std**2
-    return np.exp(-(norm_multi(x, center) ** 2) / 2 / var) #/ np.sqrt(2 * np.pi * var)
+    return np.exp(-(norm_multi(x, center) ** 2) / 2 / var)
 
 
-def connexion_normal(pos, rng: Generator, std: float):
+def connexion_normal(pos, rng: Generator, std: float, mean: float, std_draw: float):
     """
     Return the connectivity matrix of the final graph
     """
     (n, m) = np.shape(pos)  # WARNING this code assume n=2
-
+    number_of_neighbours = rng.normal(
+        mean, std_draw, m
+    )  # the number of neigbours for each node
+    if (number_of_neighbours > m).any():
+        raise ValueError("You gave to some nodes more neighbours than possible")
     random_draw = rng.uniform(size=(m, m))
-
     distance_proba = np.zeros((m, m))
-
     for i in range(m):
         center = pos[:, i]
-        distance_proba[:, i] = local_connect(pos, center, std)
+        k_neighbours = max(
+            0, int(number_of_neighbours[i])
+        )  # the number of neighbours is always positive
+        chosen_index = rng.choice(m, k_neighbours, replace=False)
+        neighbours = pos[:, chosen_index]
+        distance_proba[chosen_index, i] = local_connect(neighbours, center, std)
     # connectivity = np.sign(distance_proba-random_draw)
     connectivity = (distance_proba > random_draw).astype(int)
+    np.fill_diagonal(connectivity, 0.0)
     return connectivity
 
 
 # ======================= Script
 if __name__ == "__main__":
     N = 100
-    std = 0.5
+    std = 1.0
     mean = 0.0
+    (xmax, ymax) = (1.0, 1.0)
     rng = np.random.default_rng(2356)
-    test_pos = pos_nodes_normal(N, mean, std, rng)
-    Adja = connexion_normal(test_pos, rng, std)
+    test_pos = pos_nodes_uniform(N, xmax, ymax, rng)
+    Adja = connexion_normal(test_pos, rng, std, 10, 1)
     print(Adja)
