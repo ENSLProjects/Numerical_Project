@@ -4,6 +4,7 @@
 import numpy as np
 from numpy.random import Generator
 from scipy.spatial.distance import pdist, squareform
+import numba
 
 
 # ======================= Functions
@@ -82,6 +83,50 @@ def connexion_normal_random(
     # connectivity = np.sign(distance_proba-random_draw)
     connectivity = (distance_proba > random_draw).astype(int)
     np.fill_diagonal(connectivity, 0.0)
+    return connectivity
+
+@numba.jit(nopython=True)
+def connexion_normal_random_NUMBA(
+    pos, std: float, mean: float, std_draw: float, m: int
+):
+    """
+    Return the connectivity matrix of the final graph.
+    This version is accelerated with Numba.
+    
+    NOTE: Numba's nopython=True mode cannot use the `Generator` object (rng).
+    We must pass in `m` (the size) and use the standard `np.random.*` functions
+    inside, which Numba *can* compile.
+    """
+    
+    # Numba requires a bit more explicit type handling
+    number_of_neighbours = np.random.normal(
+        mean, std_draw, m
+    )    
+    random_draw = np.random.uniform(0.0, 1.0, size=(m, m))
+    distance_proba = np.zeros((m, m))
+    for i in range(m):
+        center = pos[:, i]
+        k_neighbours = max(
+            0, int(number_of_neighbours[i])
+        )
+        if k_neighbours == 0:
+            continue
+        # Numba compatible way to do rng.choice(m, k, replace=False)
+        all_indices = np.arange(m)
+        np.random.shuffle(all_indices)
+        chosen_index = all_indices[:k_neighbours]
+        var = std**2
+        for idx in chosen_index:
+            neighbour = pos[:, idx]
+            # (n=2, but Numba can't know that from the shape)
+            dx = neighbour[0] - center[0]
+            dy = neighbour[1] - center[1]
+            dist_sq = dx**2 + dy**2
+            prob = np.exp(-dist_sq / (2 * var))
+            distance_proba[idx, i] = prob
+    connectivity = (distance_proba > random_draw).astype(np.int32)
+    for i in range(m):
+        connectivity[i, i] = 0
     return connectivity
 
 
