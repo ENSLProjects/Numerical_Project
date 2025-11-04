@@ -3,6 +3,7 @@
 # ======================= Libraries
 import numpy as np
 from numpy.random import Generator
+from scipy.spatial.distance import pdist, squareform
 
 
 # ======================= Functions
@@ -84,21 +85,19 @@ def connexion_normal_random(
     return connectivity
 
 
-def connexion_normal_deterministic(
-    pos, rng: Generator, std: float, mean: float, std_draw: float
-):
+def connexion_normal_deterministic(pos, rng: Generator, std: float):
     """
     Return the connectivity matrix of the final graph
     """
-    (n, m) = np.shape(pos)  # WARNING this code assume n=2
+    (n, m) = np.shape(pos)
+    assert n == 2, "The entire code assumes the nodes are in a 2D space"
+    assert std != 0, "Diving by zero"
+    distances_matrix = squareform(pdist(pos.T, metric="euclidean"))
+    var = std**2
+    distance_proba = np.exp(-(distances_matrix**2) / (2 * var))
     random_draw = rng.uniform(size=(m, m))
-    distance_proba = np.zeros((m, m))
-    for i in range(m):
-        center = pos[:, i]
-        distance_proba[:, i] = local_connect_gaussian(pos, center, std)
-    # connectivity = np.sign(distance_proba-random_draw)
     connectivity = (distance_proba > random_draw).astype(int)
-    np.fill_diagonal(connectivity, 0.0)
+    np.fill_diagonal(connectivity, 0)
     return connectivity
 
 
