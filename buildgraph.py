@@ -44,7 +44,7 @@ def local_connect(x, center, std: float):
         "No sense to have a standard deviation of zero for a probability distribution"
     )
     var = std**2
-    return np.exp(-(norm_multi(x, center) ** 2) / 2 / var) / np.sqrt(2 * np.pi * var)
+    return np.exp(-(norm_multi(x, center) ** 2) / 2 / var) #/ np.sqrt(2 * np.pi * var)
 
 
 def connexion_normal(pos, rng: Generator, std: float):
