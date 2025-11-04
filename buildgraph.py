@@ -47,7 +47,9 @@ def local_connect(x, center, std: float):
     return np.exp(-(norm_multi(x, center) ** 2) / 2 / var)
 
 
-def connexion_normal(pos, rng: Generator, std: float, mean: float, std_draw: float):
+def connexion_normal_random(
+    pos, rng: Generator, std: float, mean: float, std_draw: float
+):
     """
     Return the connectivity matrix of the final graph
     """
@@ -73,6 +75,24 @@ def connexion_normal(pos, rng: Generator, std: float, mean: float, std_draw: flo
     return connectivity
 
 
+def connexion_normal_deterministic(
+    pos, rng: Generator, std: float, mean: float, std_draw: float
+):
+    """
+    Return the connectivity matrix of the final graph
+    """
+    (n, m) = np.shape(pos)  # WARNING this code assume n=2
+    random_draw = rng.uniform(size=(m, m))
+    distance_proba = np.zeros((m, m))
+    for i in range(m):
+        center = pos[:, i]
+        distance_proba[:, i] = local_connect(pos, center, std)
+    # connectivity = np.sign(distance_proba-random_draw)
+    connectivity = (distance_proba > random_draw).astype(int)
+    np.fill_diagonal(connectivity, 0.0)
+    return connectivity
+
+
 # ======================= Script
 if __name__ == "__main__":
     N = 100
@@ -81,5 +101,5 @@ if __name__ == "__main__":
     (xmax, ymax) = (1.0, 1.0)
     rng = np.random.default_rng(2356)
     test_pos = pos_nodes_uniform(N, xmax, ymax, rng)
-    Adja = connexion_normal(test_pos, rng, std, 10, 1)
+    Adja = connexion_normal_random(test_pos, rng, std, 10, 1)
     print(Adja)
