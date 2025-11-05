@@ -94,7 +94,7 @@ def connexion_normal_random_NUMBA(
     Return the connectivity matrix of the final graph.
     This version is accelerated with Numba.
 
-    NOTE: Numba's nopython=True mode cannot use the `Generator` object (rng).
+    Numba's nopython=True mode cannot use the `Generator` object (rng).
     We must pass in `m` (the size) and use the standard `np.random.*` functions
     inside, which Numba *can* compile.
     """
@@ -126,7 +126,7 @@ def connexion_normal_random_NUMBA(
     return connectivity
 
 
-def connexion_normal_deterministic(pos, rng: Generator, std: float):
+def connexion_normal_deterministic(pos, rng: Generator, std: float, connected: bool):
     """
     Return the connectivity matrix of the final graph
     """
@@ -139,6 +139,12 @@ def connexion_normal_deterministic(pos, rng: Generator, std: float):
     random_draw = rng.uniform(size=(m, m))
     connectivity = (distance_proba > random_draw).astype(int)
     np.fill_diagonal(connectivity, 0)
+    if connected:
+        for i in range(m):
+            if (connectivity[:, i] == 0).all():
+                shortdist = min(distance_proba[:, i])
+                correctindex = np.where(distance_proba == shortdist)
+                connectivity[correctindex, i] = 1
     return connectivity
 
 
