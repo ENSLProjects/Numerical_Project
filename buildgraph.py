@@ -88,7 +88,7 @@ def connexion_normal_random(
 
 @numba.jit(nopython=True)
 def connexion_normal_random_NUMBA(
-    pos, std: float, mean: float, std_draw: float, m: int
+    pos, std: float, mean_draw: float, std_draw: float, m: int
 ):
     """
     Return the connectivity matrix of the final graph.
@@ -99,7 +99,7 @@ def connexion_normal_random_NUMBA(
     inside, which Numba *can* compile.
     """
     # Numba requires a bit more explicit type handling
-    number_of_neighbours = np.random.normal(mean, std_draw, m)
+    number_of_neighbours = np.random.normal(mean_draw, std_draw, m)
     random_draw = np.random.uniform(0.0, 1.0, size=(m, m))
     distance_proba = np.zeros((m, m))
     for i in range(m):
@@ -126,7 +126,7 @@ def connexion_normal_random_NUMBA(
     return connectivity
 
 
-def connexion_normal_deterministic(pos, rng: Generator, std: float, connected: bool):
+def connexion_normal_deterministic(pos, rng: Generator, std: float):
     """
     Return the connectivity matrix of the final graph
     """
@@ -139,12 +139,6 @@ def connexion_normal_deterministic(pos, rng: Generator, std: float, connected: b
     random_draw = rng.uniform(size=(m, m))
     connectivity = (distance_proba > random_draw).astype(int)
     np.fill_diagonal(connectivity, 0)
-    if connected:
-        for i in range(m):
-            if (connectivity[:, i] == 0).all():
-                shortdist = min(distance_proba[:, i])
-                correctindex = np.where(distance_proba == shortdist)
-                connectivity[correctindex, i] = 1
     return connectivity
 
 
