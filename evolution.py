@@ -59,14 +59,14 @@ def evolution_vec(X_0, Y_0, N, list_ab, Eps, Adjacence):
     p = len(Adjacence)
     assert n == m, "wrong dimensions, both initial conditions don't have the same size"
     assert p == n, "missmatch dimensions"
-    X = np.zeros((N, n)) 
+    X = np.zeros((N, n))
     Y = np.zeros((N, n))
     UN = np.ones(p)
-    X[0, :] = X_0 
+    X[0, :] = X_0
     Y[0, :] = Y_0
     X_c, Y_c = transfo_coupling_vec(X[0, :], Y[0, :], Eps, Adjacence)
     for t in range(1, N):
-        X[t, :] = -list_ab[0, :] * X_c**2 + UN + Y_c 
+        X[t, :] = -list_ab[0, :] * X_c**2 + UN + Y_c
         Y[t, :] = list_ab[1, :] * X_c
         # This slice (a row) is contiguous by default!
         X_c, Y_c = transfo_coupling_vec(X[t, :], Y[t, :], Eps, Adjacence)
@@ -104,8 +104,25 @@ def MSD_vec_xy(G, X, Y):
     return MSD_values
 
 
-def MSD_vec(G, X):
+def MSD(G, X, axe=1):
+    """
+    Return the MSD in the order:
+    -- axe=1: esperance_t(variance_node(t))
+    -- axe=0: esperance_node(variance_t(node))
+    """
     n, N = X.shape
     assert n == len(G), "wrong dimension"
-    MSD_values = np.std(X, axis=0)
+    MSD_values = np.std(X, axis=axe)
     return np.mean(MSD_values)
+
+
+def MSD_inverse(G, X, axe=0):
+    """
+    Return the MSD in the order:
+    -- axe=1: esperance_t(variance_node(t))
+    -- axe=0: esperance_node(variance_t(node))
+    """
+    n, N = X.shape
+    assert n == len(G), "wrong dimension"
+    MSD_values = np.mean(X, axis=axe)
+    return np.std(MSD_values)
