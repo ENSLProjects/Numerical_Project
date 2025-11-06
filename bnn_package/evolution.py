@@ -8,32 +8,6 @@ from scipy.spatial.distance import pdist
 
 # ======================= Functions
 
-
-@numba.jit(nopython=True)
-def count(data, axis: str):
-    assert len(np.shape(data)) == 4, "wrong data shape input"
-    if axis == "x":
-        p = (0, 0)
-    elif axis == "y":
-        p = (0, 1)
-    elif axis == "u":
-        p = (1, 0)
-    elif axis == "v":
-        p = (1, 1)
-    else:
-        return "axis not existent"
-    simu = np.sort(data[:, p[0], p[1], :], axis=0)
-    k = len(simu[0])
-    nb_points = [1] * k
-    for i in range(k):
-        start = simu[0, i]
-        for j in range(1, len(simu)):
-            if simu[j, i] != start:
-                nb_points[i] += 1
-                start = simu[j, i]
-    return nb_points
-
-
 @numba.jit(nopython=True)
 def transfo_coupling_vec(X, Y, Eps, Adjacence):
     m, n = len(X), len(Y)

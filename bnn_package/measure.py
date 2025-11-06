@@ -8,6 +8,56 @@ from scipy.spatial.distance import pdist
 
 # ======================= Functions
 
+
+@numba.jit(nopython=True)
+def count(data, axis: str):
+    assert len(np.shape(data)) == 4, "wrong data shape input"
+    if axis == "x":
+        p = (0, 0)
+    elif axis == "y":
+        p = (0, 1)
+    elif axis == "u":
+        p = (1, 0)
+    elif axis == "v":
+        p = (1, 1)
+    else:
+        return "axis not existent"
+    simu = np.sort(data[:, p[0], p[1], :], axis=0)
+    k = len(simu[0])
+    nb_points = [1] * k
+    for i in range(k):
+        start = simu[0, i]
+        for j in range(1, len(simu)):
+            if simu[j, i] != start:
+                nb_points[i] += 1
+                start = simu[j, i]
+    return nb_points
+
+
+def find_settling_time(
+    signal, final_n_samples, tolerance_percent=1
+):
+    """
+    Finds the time when the signal settles within a tolerance band of its final value.
+    """
+    final_value = np.mean(signal[-final_n_samples:])
+    total_change = np.max(np.abs(signal - final_value))
+    tolerance = (tolerance_percent / 100.0) * total_change
+    upper_bound = final_value + tolerance
+    lower_bound = final_value - tolerance
+    outside_mask = (signal > upper_bound) | (signal < lower_bound)
+    if not np.any(outside_mask):
+        return 0  # It never started outside the band
+    last_index_outside = np.where(outside_mask)[0][-1]
+    settling_index = last_index_outside + 1
+    if settling_index >= len(
+        signal
+    ):  # Handle case where it never settles within the given window
+        print("Warning: Signal might not have settled.")
+        settling_index = len(signal) - 1
+    return settling_index, settling_index, (lower_bound, upper_bound)
+
+
 @numba.jit(nopython=True)
 def MSD_xy(G, X, Y):
     """
@@ -67,16 +117,16 @@ def MSD_inverse(G, X, axe=0):
 
 
 @numba.jit(nopython=True)
-def Synchronized_error(X, Y, N_nodes, time): #not easily vectorizable 
+def Synchronized_error(X, Y, N_nodes, time):  # not easily vectorizable
     assert N_nodes > 1, "Require at least two nodes"
-    error = 0 
+    error = 0
     for i in range(N_nodes - 1):
-        for j in range(i+1, N_nodes):
+        for j in range(i + 1, N_nodes):
             error += np.sqrt(
                 (X[time, i] - X[time, j]) ** 2 + (Y[time, i] - Y[time, j]) ** 2
             )
     return 2 * error / N_nodes / (N_nodes - 1)
 
+
 def Synchronized_error_mean():
     return 4
-    
