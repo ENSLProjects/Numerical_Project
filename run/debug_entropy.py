@@ -1,19 +1,19 @@
 import numpy as np
 import entropy.entropy as ee
 
-# --- 1. Inspecter la signature réelle ---
+# --- Inspecter la signature réelle ---
 print("-" * 30)
 print("DOCSTRING DE LA FONCTION :")
 # Ceci va nous dire EXACTEMENT quels arguments sont attendus
 print(ee.compute_entropy.__doc__) 
 print("-" * 30)
 
-# --- 2. Préparation des données (avec Sécurité Anti-Crash) ---
+# --- Préparation des données (avec Sécurité Anti-Crash) ---
 def get_safe_data(n_samples=1000):
     # On génère des données
     x = np.random.randn(n_samples, 1)
     
-    # ASTUCE PRO : On ajoute un bruit minuscule (jitter)
+    # On ajoute un bruit minuscule (jitter)
     # Cela empêche log(0) si jamais deux valeurs sont identiques
     x += np.random.normal(0, 1e-10, x.shape)
     
@@ -24,7 +24,7 @@ def get_safe_data(n_samples=1000):
 data = get_safe_data()
 print(f"Données : forme {data.shape}, type {data.dtype}")
 
-# --- 3. Augmenter la verbosité au maximum ---
+# --- Augmenter la verbosité au maximum ---
 # Cela forcera la lib C à dire POURQUOI elle plante
 try:
     ee.set_verbosity(2) # Ou 3 si possible
@@ -32,10 +32,9 @@ try:
 except Exception:
     pass
 
-# --- 4. Test progressif ---
+# --- Test progressif ---
 print("\n--- Tentative 1 : Standard ---")
 try:
-    # k=3 est souvent plus sûr que k=5 pour commencer
     res = ee.compute_entropy(data, 3)
     print(f"Résultat : {res}")
 except Exception as e:

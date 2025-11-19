@@ -1,6 +1,7 @@
 import numpy as np
+from bnn_package import prepare_data
 
-# --- 1. PATCH DE COMPATIBILITÉ (Indispensable pour Numpy récent) ---
+# --- PATCH DE COMPATIBILITÉ (Indispensable pour Numpy récent) ---
 if not hasattr(np, 'int'):
     setattr(np, 'int', int)
 if not hasattr(np, 'float'):
@@ -8,24 +9,7 @@ if not hasattr(np, 'float'):
 
 import entropy.entropy as ee
 
-# --- 2. FONCTION UTILITAIRE ROBUSTE ---
-def prepare_data(arr):
-    """
-    Prépare les données pour la lib C Entropy.
-    Règle 1 : Format (1, N_samples) obligatoire (donc 1 ligne, N colonnes).
-    Règle 2 : Mémoire contiguë (C-contiguous).
-    Règle 3 : Type float64 (double).
-    """
-    # Si c'est un vecteur plat (N,), on le passe en (1, N)
-    if arr.ndim == 1:
-        arr = arr.reshape(1, -1)
-    # Si c'est (N, 1), on transpose en (1, N)
-    elif arr.shape[0] > arr.shape[1]:
-        arr = arr.T
-        
-    return np.ascontiguousarray(arr, dtype=np.float64)
-
-# --- 3. PRÉPARATION DES DONNÉES ---
+# --- PRÉPARATION DES DONNÉES ---
 N = 1000
 # Génération de X
 x_raw = np.random.randn(N)
@@ -38,10 +22,10 @@ y = prepare_data(y_raw)
 
 print(f"Données prêtes : forme {x.shape} (doit être (1, {N}))")
 
-# --- 4. CONFIGURATION ---
+# --- CONFIGURATION ---
 ee.set_verbosity(1)
 
-# --- 5. CALCUL ENTROPIE (H) ---
+# --- CALCUL ENTROPIE (H) ---
 print("-" * 30)
 try:
     h = ee.compute_entropy(
@@ -55,10 +39,9 @@ try:
 except Exception as e:
     print(f"Erreur Entropie : {e}")
 
-# --- 6. CALCUL INFO MUTUELLE (MI) ---
+# --- CALCUL INFO MUTUELLE (MI) ---
 print("-" * 30)
 try:
-    # CORRECTION : compute_MI ne prend PAS 'n_embed' ni 'stride'
     # Elle compare deux signaux bruts X et Y.
     mi_result = ee.compute_MI(
         x=x, 

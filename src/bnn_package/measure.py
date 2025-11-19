@@ -4,10 +4,25 @@
 
 import numpy as np
 import numba
-from scipy.spatial.distance import pdist
+from scipy.spatial.distance import pdist # noqa: F401
 
 # ======================= Functions
 
+def prepare_data(arr):
+    """
+    Prépare les données pour la lib C Entropy.
+    Règle 1 : Format (1, N_samples) obligatoire (donc 1 ligne, N colonnes).
+    Règle 2 : Mémoire contiguë (C-contiguous).
+    Règle 3 : Type float64 (double).
+    """
+    # Si c'est un vecteur plat (N,), on le passe en (1, N)
+    if arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    # Si c'est (N, 1), on transpose en (1, N)
+    elif arr.shape[0] > arr.shape[1]:
+        arr = arr.T
+        
+    return np.ascontiguousarray(arr, dtype=np.float64)
 
 @numba.jit(nopython=True)
 def count(data, axis: str):
