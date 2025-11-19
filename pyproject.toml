@@ -5,7 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "bnn_package"
 version = "0.1.0"
-dependencies = []
+dependencies = ["numpy", 
+                "scipy", 
+                "numba", 
+                "tqdm", 
+                "matplotlib", 
+                "entropy"]
 
 [tool.setuptools.packages.find]
 where = ["."] 

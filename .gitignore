@@ -1,10 +1,15 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
+**__pycache__
 *$py.class
 
 # C extensions
 *.so
+*.o
+*.dylib
+
+.DS_Store
 
 # Distribution / packaging
 .Python
@@ -139,7 +144,7 @@ celerybeat.pid
 .envrc
 .venv
 env/
-venv/
+venv_numproject/
 ENV/
 env.bak/
 venv.bak/

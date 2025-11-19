@@ -4,7 +4,6 @@
 
 import numpy as np
 import numba
-from scipy.spatial.distance import pdist
 
 # ======================= Functions
 
