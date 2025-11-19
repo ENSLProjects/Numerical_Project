@@ -1,17 +1,33 @@
-[build-system]
-requires = ["setuptools", "wheel"]
-build-backend = "setuptools.build_meta"
-
 [project]
-name = "bnn_package"
+name = "bnn-package"
 version = "0.1.0"
-dependencies = ["numpy", 
-                "scipy", 
-                "numba", 
-                "tqdm", 
-                "matplotlib", 
-                "entropy"]
+description = "The goal is to build stable functions to study and model a biological neural network through information theory and random matrices."
+readme = "README.md"
+authors = [
+    { name = "Roman Beauvallet", email = "roman.beauvallet@ens-lyon.fr" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "entropy",
+    "ipykernel>=7.1.0",
+    "matplotlib>=3.10.7",
+    "networkx>=3.5",
+    "numba>=0.62.1",
+    "numpy>=2.3.5",
+    "scipy>=1.16.3",
+    "tqdm>=4.67.1",
+]
 
-[tool.setuptools.packages.find]
-where = ["."] 
-include = ["bnn_package*"] 
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "cython>=3.2.1",
+    "pip>=25.3",
+    "setuptools>=80.9.0",
+]
+
+[tool.uv.sources]
+entropy = { path = "../DevProject/entropy-4.1.1/src/cython", editable = true }
