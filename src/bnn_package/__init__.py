@@ -10,7 +10,7 @@ from .buildgraph import (
     connexion_normal_deterministic, # noqa: F401
 )
 from .evolution import transfo_coupling_vec, evolution_vec  # noqa: F401
-from .measure import MSD, MSD_inverse, find_settling_time  # noqa: F401
+from .measure import MSD, MSD_inverse, find_settling_time, prepare_data  # noqa: F401
 
 __all__ = [
     "pos_nodes_uniform",
@@ -19,5 +19,6 @@ __all__ = [
     "local_connect_lorentz",
     "connexion_normal_random_NUMBA",
     "connexion_normal_deterministic",
-    "find_settling_time"
+    "find_settling_time", 
+    "prepare_data"
 ]
