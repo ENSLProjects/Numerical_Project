@@ -24,13 +24,26 @@ Before proceeding, ensure you have the following installed:
 
 ---
 
+## Step 0: Dowload the code source from Nicolas Garnier
+
+**Source code** [link](https://github.com/nbgarnier/entropy)
+
 ## Step 1: Install System Dependencies (GSL & FFTW)
 
 These are the libraries written in C/C++ that the `entropy` package depends on.
 
 ```bash
 brew install gsl fftw
+```
 
-## Step 2: 
+## Step 2: Create the package
 
+```bash
 ./configure CFLAGS=-I/opt/homebrew/include LDFLAGS=-L/opt/homebrew/lib
+```
+
+## Step 3: Compile for python 
+
+```bash
+make python 
+```
