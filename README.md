@@ -24,9 +24,11 @@ Before proceeding, ensure you have the following installed:
 
 ---
 
-## Step 0: Dowload the code source from Nicolas Garnier
+## Step 0: Dowload the code source from Nicolas Garnier (ENS de Lyon)
 
-**Source code** [link](https://github.com/nbgarnier/entropy)
+**Source code** for the information theory part [entropy library in C/C++](https://github.com/nbgarnier/entropy)
+
+**Documentation:** Full documentation of the source code is available at this [link](https://perso.ens-lyon.fr/nicolas.garnier/files/html/index.html)
 
 ## Step 1: Install System Dependencies (GSL & FFTW)
 
