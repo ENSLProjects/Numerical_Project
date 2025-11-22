@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "The goal is to build stable functions to study and model a biological neural network through information theory and random matrices."
 readme = "README.md"
 authors = [
-    { name = "Roman Beauvallet", email = "roman.beauvallet@ens-lyon.fr" }
+    { name = "Roman Beauvallet", email = "roman.beauvallet@ens-lyon.fr" }, 
+    { name = "Constantin Deumier", email = "constantin.deumier@ens-lyon.fr"}
 ]
 requires-python = ">=3.13"
 dependencies = [
@@ -27,8 +28,17 @@ build-backend = "hatchling.build"
 dev = [
     "cython>=3.2.1",
     "pip>=25.3",
+    "pytest>=9.0.1",
     "setuptools>=80.9.0",
 ]
 
 [tool.uv.sources]
 entropy = { path = "../DevProject/entropy-4.1.1/src/cython", editable = true }
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+python_files = "test_*.py"
