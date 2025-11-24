@@ -30,6 +30,7 @@ dev = [
     "pip>=25.3",
     "pytest>=9.0.1",
     "setuptools>=80.9.0",
+    "sphinx>=8.2.3",
 ]
 
 [tool.uv.sources]
