@@ -9,7 +9,7 @@ from .buildgraph import (
     connexion_normal_random_NUMBA, 
     connexion_normal_deterministic, 
 )
-from .evolution import transfo_coupling_vec, evolution_vec  
+from .evolution import transfo_coupling_vec, evolution_vec, evolve_system, coupling_diffusive
 from .measure import MSD, MSD_inverse, find_settling_time, prepare_data  
 
 __all__ = [
@@ -24,5 +24,7 @@ __all__ = [
     "transfo_coupling_vec", 
     "evolution_vec",
     "MSD", 
-    "MSD_inverse"
+    "MSD_inverse", 
+    "evolve_system", 
+    "coupling_diffusive"
 ]
