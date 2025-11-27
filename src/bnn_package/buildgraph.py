@@ -141,7 +141,3 @@ def connexion_normal_deterministic(pos, rng: Generator, std: float):
     np.fill_diagonal(connectivity, 0)
     return connectivity
 
-
-# ======================= Script
-if __name__ == "__main__":
-    print("Hello world!")

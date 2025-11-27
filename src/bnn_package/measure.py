@@ -4,9 +4,15 @@
 
 import numpy as np
 import numba
-from scipy.spatial.distance import pdist # noqa: F401
+from scipy.spatial.distance import pdist  # noqa: F401
+import networkx as nx
+from tabulate import tabulate
+import time
+from datetime import datetime
+from pathlib import Path
 
 # ======================= Functions
+
 
 def prepare_data(arr):
     """
@@ -21,8 +27,9 @@ def prepare_data(arr):
     # Si c'est (N, 1), on transpose en (1, N)
     elif arr.shape[0] > arr.shape[1]:
         arr = arr.T
-        
+
     return np.ascontiguousarray(arr, dtype=np.float64)
+
 
 @numba.jit(nopython=True)
 def count(data, axis: str):
@@ -49,9 +56,7 @@ def count(data, axis: str):
     return nb_points
 
 
-def find_settling_time(
-    signal, final_n_samples, tolerance_percent=1
-):
+def find_settling_time(signal, final_n_samples, tolerance_percent=1):
     """
     Finds the time when the signal settles within a tolerance band of its final value.
     """
@@ -145,3 +150,117 @@ def Synchronized_error(X, Y, N_nodes, time):  # not easily vectorizable
 
 def Synchronized_error_mean():
     return 4
+
+
+def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
+    """
+    Computes graph topology metrics and prints a table to the console.
+
+    Args:
+        adj_matrix (np.array): The adjacency matrix.
+        sim_name (str): Label for the simulation.
+        fast_mode (bool): If True, skips slow metrics (Betweenness, Path Length).
+    """
+    t_start = time.time()
+
+    # 1. Basic Stats (NumPy - Instant)
+    N = adj_matrix.shape[0]
+    num_edges = np.sum(adj_matrix) / 2
+    avg_degree = np.mean(np.sum(adj_matrix, axis=1))
+    density = (2 * num_edges) / (N * (N - 1)) if N > 1 else 0
+
+    # 2. NetworkX Object (Low Overhead)
+    G = nx.from_numpy_array(adj_matrix)
+
+    # 3. Connectivity & Clustering
+    is_connected = nx.is_connected(G)
+    clustering = nx.average_clustering(G)
+
+    # 4. Heavy Metrics (Optional)
+    avg_path = "Skipped"
+    diameter = "Skipped"
+    max_betweenness = "Skipped"
+
+    if not fast_mode:
+        # Path Lengths
+        if is_connected:
+            avg_path = f"{nx.average_shortest_path_length(G):.4f}"
+            diameter = nx.diameter(G)
+        else:
+            avg_path = "Inf (Disconnected)"
+            diameter = "Inf"
+
+        # Betweenness (The expensive part)
+        # We only take the max value to keep the table clean
+        bet_dict = nx.betweenness_centrality(G)
+        max_betweenness = f"{max(bet_dict.values()):.4f}"
+
+    # 5. Prepare Data for Tabulate
+    # We create a list of lists
+    table_data = [
+        ["Metric", "Value", "Description"],
+        ["Simulation ID", sim_name, "Run Identifier"],
+        ["Edges (E)", int(num_edges), "Total Connections"],
+        ["Avg Degree (<k>)", f"{avg_degree:.4f}", "Avg neighbors per node"],
+        ["Density", f"{density:.4f}", "Actual/Possible edges"],
+        ["Connected?", "Yes" if is_connected else "No", "Is graph one component?"],
+        ["Clustering Coeff", f"{clustering:.4f}", "Local triangular loops"],
+        ["Avg Path Length", avg_path, "Global Integration"],
+        ["Diameter", diameter, "Longest shortest path"],
+        ["Max Betweenness", max_betweenness, "Centrality of hub node"],
+    ]
+
+    # 6. Print using 'fancy_grid' for that scientific look
+    print("\n" + "=" * 60)
+    print(f">>> SIMULATION INITIALIZATION LOG [{time.strftime('%H:%M:%S')}]")
+    print("=" * 60)
+    print(tabulate(table_data, headers="firstrow", tablefmt="fancy_grid"))
+
+    t_end = time.time()
+    print(f"\n[System] Topology analysis completed in {t_end - t_start:.3f}s")
+    print("=" * 60 + "\n")
+
+def get_simulation_path(base_folder, sim_name, parameters=None):
+    """
+    Generates a valid path and ensures the folder exists.
+    
+    Args:
+        base_folder (str): e.g., "results" or "/home/user/data"
+        sim_name (str): General prefix, e.g., "FHN_Run"
+        parameters (dict): Optional. Adds param values to filename for easy searching.
+    
+    Returns:
+        Path: A full Path object ready for h5py
+    """
+    # 1. Define the Output Directory
+    # We use Path() so this works on Windows and Linux automatically
+    # We add a date subfolder to keep things organized
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    output_dir = Path(base_folder) / date_str
+    
+    # 2. Create the directory if it doesn't exist
+    # parents=True allows creating "results/2023-10-27" in one go
+    # exist_ok=True prevents error if folder already exists
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 3. Construct the Filename
+    # Start with a Timestamp for uniqueness
+    time_str = datetime.now().strftime("%H-%M-%S")
+    filename = f"{sim_name}_{time_str}"
+    
+    # Optional: Append key parameters to filename (e.g., "Sim_12-00-00_eps0.1.h5")
+    if parameters:
+        # Filter for crucial params to keep filename short
+        if 'epsilon' in parameters:
+            filename += f"_eps{parameters['epsilon']:.2f}"
+        if 'alpha' in parameters:
+            filename += f"_a{parameters['alpha']:.2f}"
+        if 'time_length_simulation' in parameters:
+            filename += f"_finaltime{parameters['time_length_simulation']:.2f}"
+        if 'number of nodes' in parameters:
+            filename += f"_nodes{parameters['number of nodes']:.2f}"
+            
+    filename += ".h5"
+    
+    # 4. Join folder and filename
+    return output_dir / filename

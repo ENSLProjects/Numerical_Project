@@ -29,7 +29,7 @@ def get_coupling_operator(Adjacence):
 @numba.jit(
     nopython=True
 )  # option mode "fastmath=True" can be swith on if data are clean enough
-def coupling_diffusive(State, eps, Norm_Adj):
+def coupling_func(State, eps, Norm_Adj):
     """
     Applies diffusive coupling to the State.
 
@@ -48,7 +48,17 @@ def evolve_system(
     State_0, N_steps, params, model_step_func, coupling_func, coupling_op, eps
 ):
     """
-    Note: We replaced 'adj_matrix' with 'coupling_op' in the arguments.
+    Main generic solver. 
+
+    State_0 = Initial conditions
+    N_steps = length of the simulation (total time)
+    params = matrix of parameters for a given system
+    model_step_function = dynamical system's function 
+    coupling_func = function defining the coupling
+    coupling_op = operator needed for the coupling_func 
+    eps = value of the coupling 
+
+    return the tensor of evolution state with the shape (N_steps, n_nodes, dim)
     """
     n_nodes, dim = State_0.shape
     Trajectory = np.zeros((N_steps, n_nodes, dim))
@@ -72,12 +82,10 @@ def fhn_derivatives(State, params):
     """
     v = State[:, 0]
     w = State[:, 1]
-    # Unpack parameters
     a = params[0]
     b = params[1]
     tau = params[2]
     I_ext = params[3]
-    # Pre-allocate derivative array
     dState = np.empty_like(State)
     # dv/dt = v - v^3/3 - w + I
     dState[:, 0] = v - (v**3 / 3.0) - w + I_ext
