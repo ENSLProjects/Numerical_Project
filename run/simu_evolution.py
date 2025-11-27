@@ -8,30 +8,43 @@ from bnn_package import (
     evolve_system,
     coupling_func,
     step_fhn_rk4,
+    step_henon,
     print_simulation_report,
-    get_simulation_path
+    get_simulation_path,
 )
-from numpy.random import default_rng
 
+import numpy as np
+from numpy.random import default_rng
+import time
 import h5py
 # ======================= Parameters
 
 ############# Graph building
 
 rng = default_rng(1234567890)
-n = 100
+n = 200
 (xmax, ymax) = (10.0, 10.0)
 pos = pos_nodes_uniform(n, xmax, ymax, rng)
 std = 2.0
+transitoire = 1000
 
 ############ Time evolution
 
-parameterHenon = []
-parameterFhN = []
-N_time = 50000
+parameterHenon = [1.1, 0.3]  # a and b in this order
+parameterFhN = []  # a, b, tau, Iext, dt in this order
+
+model = "Henon"
+
+if model == "Henon":
+    param = parameterHenon
+    model_step_func = step_henon
+elif model == "FhN":
+    param = parameterFhN
+    model_step_func = step_fhn_rk4
+
+N_time = 20000
 eps = 0.3
-ci = 0
-model_step_func = step_fhn_rk4
+ci = 0.5 * np.ones((n, 2))
 
 run_name = "trial"
 
@@ -39,14 +52,14 @@ params_dict = {
     "number of nodes": n,
     "time length simulation": N_time,
     "epsilon": eps,
-    "model": f"{model_step_func}",
-    "model parameters": parameterHenon,
-    "run name": run_name
+    "model": model,
+    "model parameters": param,
+    "run name": run_name,
 }
 
 MY_FOLDER = "data_simulation"
 
-save_path = get_simulation_path(MY_FOLDER, "Henon", params_dict)
+save_path = get_simulation_path(MY_FOLDER, model, params_dict)
 # ====================== Graph
 
 Adjacency = connexion_normal_deterministic(pos, rng, std)
@@ -54,7 +67,7 @@ DiffusionOp = get_coupling_operator(Adjacency)
 
 # ====================== Log Graph
 
-print(30 * "=")
+print(60 * "=")
 
 print("Number of nodes: N = ", n)
 print(
@@ -62,16 +75,24 @@ print(
     std,
 )
 
-print(30 * "=")
-print_simulation_report(Adjacency, "Sim_001", fast_mode=False)
+print(60 * "=")
+print_simulation_report(Adjacency, run_name, fast_mode=False)
 
+print(20 * "-" + ">" + " READY TO LAUNCH ")
 
 # ====================== Evolution
 
+t_start = time.time()
 FullData = evolve_system(
-    ci, N_time, parameterFhN, model_step_func, coupling_func, DiffusionOp, eps
+    ci, N_time, parameterHenon, model_step_func, coupling_func, DiffusionOp, eps
+)
+t_end = time.time()
+
+print(
+    "\n" + 20 * "-" + ">" + f" SIMULATION SUCCESFULLY COMPLETED in {t_end - t_start:.3f}s"
 )
 
+Datacuted = FullData[transitoire:, :, :]
 
 with h5py.File(save_path, "a") as f:
     # Create a Group (like a folder)
@@ -80,7 +101,7 @@ with h5py.File(save_path, "a") as f:
     # Save the heavy data with compression
     # 'chunks' allows efficient slicing later
     dset = grp.create_dataset(
-        "trajectory", data=FullData, compression="gzip", compression_opts=4
+        "trajectory", data=Datacuted, compression="gzip", compression_opts=4
     )
 
     # Save Adjacency
@@ -90,3 +111,5 @@ with h5py.File(save_path, "a") as f:
     # Store parameters as attributes of the group
     for key, value in params_dict.items():
         grp.attrs[key] = value
+
+print(f"\n DATA SUCCESSFULLY SAVED in {MY_FOLDER}")

@@ -16,6 +16,7 @@ from .evolution import (
     get_coupling_operator,
     coupling_func,
     step_fhn_rk4,
+    step_henon
 )
 
 from .measure import (
@@ -43,6 +44,7 @@ __all__ = [
     "evolve_system",
     "coupling_func",
     "step_fhn_rk4",
+    "step_henon",
     "get_coupling_operator",
     "print_simulation_report",
     "get_simulation_path"
