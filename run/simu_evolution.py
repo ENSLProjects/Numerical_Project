@@ -31,7 +31,7 @@ transitoire = 1000
 ############ Time evolution
 
 parameterHenon = [1.1, 0.3]  # a and b in this order
-parameterFhN = []  # a, b, tau, Iext, dt in this order
+parameterFhN = [0.7, 0.8, 12.5, 0.5, 0.01]  # a, b, tau, Iext, dt in this order
 
 model = "Henon"
 
@@ -46,7 +46,6 @@ N_time = 20000
 eps = 0.3
 ci = 0.5 * np.ones((n, 2))
 
-run_name = "trial"
 
 params_dict = {
     "number of nodes": n,
@@ -54,7 +53,6 @@ params_dict = {
     "epsilon": eps,
     "model": model,
     "model parameters": param,
-    "run name": run_name,
 }
 
 MY_FOLDER = "data_simulation"
@@ -76,7 +74,7 @@ print(
 )
 
 print(60 * "=")
-print_simulation_report(Adjacency, run_name, fast_mode=False)
+print_simulation_report(Adjacency, fast_mode=False)
 
 print(20 * "-" + ">" + " READY TO LAUNCH ")
 
@@ -84,32 +82,32 @@ print(20 * "-" + ">" + " READY TO LAUNCH ")
 
 t_start = time.time()
 FullData = evolve_system(
-    ci, N_time, parameterHenon, model_step_func, coupling_func, DiffusionOp, eps
+    ci, N_time, param, model_step_func, coupling_func, DiffusionOp, eps
 )
 t_end = time.time()
 
 print(
-    "\n" + 20 * "-" + ">" + f" SIMULATION SUCCESFULLY COMPLETED in {t_end - t_start:.3f}s"
+    "\n"
+    + 20 * "-"
+    + ">"
+    + f" SIMULATION SUCCESFULLY COMPLETED in {t_end - t_start:.3f}s"
 )
 
 Datacuted = FullData[transitoire:, :, :]
 
 with h5py.File(save_path, "a") as f:
-    # Create a Group (like a folder)
-    grp = f.create_group(run_name)
-
     # Save the heavy data with compression
     # 'chunks' allows efficient slicing later
-    dset = grp.create_dataset(
+    f.create_dataset(
         "trajectory", data=Datacuted, compression="gzip", compression_opts=4
     )
 
     # Save Adjacency
-    grp.create_dataset("adjacency", data=Adjacency, compression="gzip")
+    f.create_dataset("adjacency", data=Adjacency, compression="gzip")
 
     # === THE KEY FEATURE: METADATA ===
     # Store parameters as attributes of the group
     for key, value in params_dict.items():
-        grp.attrs[key] = value
+        f.attrs[key] = value
 
 print(f"\n DATA SUCCESSFULLY SAVED in {MY_FOLDER}")

@@ -152,7 +152,7 @@ def Synchronized_error_mean():
     return 4
 
 
-def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
+def print_simulation_report(adj_matrix, fast_mode=False):
     """
     Computes graph topology metrics and prints a table to the console.
 
@@ -199,7 +199,7 @@ def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
     # We create a list of lists
     table_data = [
         ["Metric", "Value", "Description"],
-        ["Simulation ID", sim_name, "Run Identifier"],
+        #["Simulation ID", sim_name, "Run Identifier"],
         ["Edges (E)", int(num_edges), "Total Connections"],
         ["Avg Degree (<k>)", f"{avg_degree:.4f}", "Avg neighbors per node"],
         ["Density", f"{density:.4f}", "Actual/Possible edges"],
@@ -258,7 +258,7 @@ def get_simulation_path(base_folder, sim_name, parameters=None):
         if 'time_length_simulation' in parameters:
             filename += f"_finaltime{parameters['time_length_simulation']:.2f}"
         if 'number of nodes' in parameters:
-            filename += f"_nodes{parameters['number of nodes']:.2f}"
+            filename += f"_nodes{parameters['number of nodes']}"
             
     filename += ".h5"
     
