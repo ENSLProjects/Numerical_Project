@@ -29,18 +29,32 @@ def get_coupling_operator(Adjacence):
 @numba.jit(
     nopython=True
 )  # option mode "fastmath=True" can be swith on if data are clean enough
-def coupling_func(State, eps, Norm_Adj):
+def coupling_func(State, eps, Adj, Model):
     """
     Applies diffusive coupling to the State.
 
     State: (N_nodes, Dimension)
+    Model : type of coupling : 'Henon' or 'FN'
     Norm_Adj: Pre-computed (N_nodes, N_nodes) matrix
     """
-    interaction = (
-        Norm_Adj @ State
-    )  # For sparse or huge network (more than 1000 nodes with only few neighbors by node use an explicit for loop with numba)
-    State_new = (1.0 - eps) * State + eps * interaction
+
+    if Model == 'Henon':
+        Adj = get_coupling_operator(Adj)
+        interaction = (
+            Adj @ State
+        )  # For sparse or huge network (more than 1000 nodes with only few neighbors by node use an explicit for loop with numba)
+        State_new = (1.0 - eps) * State + eps * interaction
+    if Model == 'FN':
+        degrees = np.sum(A, axis=1)
+        Deg = np.diag(degrees)
+        L = Deg-A 
+        State_new = L*State[:,0]
     return State_new
+
+
+
+
+
 
 
 @numba.jit(nopython=True)
@@ -74,23 +88,33 @@ def evolve_system(
 
 
 @numba.jit(nopython=True)
-def fhn_derivatives(State, params):
+def fhn_derivatives(State, params, Adj, N_p,C_r, D):
     """
     Computes the derivative dS/dt for a system of oscillators.
-    State shape: (N_nodes, 2) -> col 0 is v (voltage), col 1 is w (recovery)
-    Params: [a, b, tau, I_ext, dt] (Note: dt is not used here, but passed in params)
+    State shape: (N_nodes, 3) -> col 0 is v_e (voltage of active node), col 1 is g (recovery), col 2 is v_p (voltage of passive node)
+    Params: bibliothèque (Note: dt is not used here, but passed in params)
+    A : adjacency matrix (N*N)
+    N_p : diagonal matrix -> number of passive node for each active node
     """
-    v = State[:, 0]
-    w = State[:, 1]
-    a = params[0]
-    b = params[1]
-    tau = params[2]
-    I_ext = params[3]
+    eps=0
+    v_e = State[:, 0]
+    g = State[:, 1]
+    v_p = State[:, 2]
+    
+    K = params['K']
+    A = params['A']
+    Eps = params['Eps']
+    alpha = params['alpha']
+    V_RP = params['V_RP']
+
+
     dState = np.empty_like(State)
-    # dv/dt = v - v^3/3 - w + I
-    dState[:, 0] = v - (v**3 / 3.0) - w + I_ext
-    # dw/dt = (v + a - b*w) / tau
-    dState[:, 1] = (v + a - b * w) / tau
+    # dv_e/dt = Av_e(v_e-alpha)(1-v_e)-g+n_pC_r(V_p-V_e) - DL(V_e)
+    dState[:, 0] = A*np.multiply(v_e,np.multiply((v_e-alpha*np.ones(len(v_e))),(1-v_e)))-g+N_p*C_r*(v_p-v_e) - D*coupling_func(State, eps, Adj, Model= 'FN')
+    # dg/dt = Eps(v_e-g)
+    dState[:, 1] = Eps*(v_e-g)
+    # dv_p/dt = K(V_RP-v_p)-C_r(v_p-v_e)
+    dState[:,2] = K*(V_RP*np.ones(len(v_p))-v_p)-C_r*np.identity(len(v_p))*(v_p-v_e)
     return dState
 
 
@@ -173,3 +197,5 @@ def evolution_vec(X_0, Y_0, N, list_ab, Eps, Adjacence):
         # This slice (a row) is contiguous by default!
         X_c, Y_c = transfo_coupling_vec(X[t, :], Y[t, :], Eps, Adjacence)
     return X, Y
+
+print("Hello")
