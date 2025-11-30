@@ -7,7 +7,9 @@ import numba
 
 # ======================= Functions
 
-
+@numba.jit(
+    nopython=True
+) 
 def get_coupling_operator(Adjacence):
     """
     Pre-computes the normalized adjacency matrix.
@@ -45,10 +47,13 @@ def coupling_func(State, eps, Adj, Model):
         )  # For sparse or huge network (more than 1000 nodes with only few neighbors by node use an explicit for loop with numba)
         State_new = (1.0 - eps) * State + eps * interaction
     if Model == 'FN':
-        degrees = np.sum(A, axis=1)
+        degrees = np.sum(Adj, axis=1)
         Deg = np.diag(degrees)
-        L = Deg-A 
-        State_new = L*State[:,0]
+        L = Deg-Adj 
+        State_new = np.zeros(State.shape)
+        State_new[:,0] = L@State[:,0]
+        State_new[:,1] = State[:,1]
+        State_new[:,2] = State[:,2]
     return State_new
 
 
@@ -59,7 +64,7 @@ def coupling_func(State, eps, Adj, Model):
 
 @numba.jit(nopython=True)
 def evolve_system(
-    State_0, N_steps, params, model_step_func, coupling_func, coupling_op, eps
+    State_0, N_steps, params, model_step_func, eps, N_p, Adj, C_r, D
 ):
     """
     Main generic solver. 
@@ -76,19 +81,23 @@ def evolve_system(
     """
     n_nodes, dim = State_0.shape
     Trajectory = np.zeros((N_steps, n_nodes, dim))
-    Trajectory[0, :, :] = State_0
-    # .copy() here ensures Current_State is contiguous in memory to start with.
-    Current_State = Trajectory[0, :, :].copy()
-    Current_State = coupling_func(Current_State, eps, coupling_op)
+    Trajectory[0] = State_0.copy()
+
+    Current_State = State_0.copy()
+
     for t in range(1, N_steps):
-        Next_State = model_step_func(Current_State, params)
-        Trajectory[t, :, :] = Next_State
-        Current_State = coupling_func(Next_State, eps, coupling_op)
+        # Assure la contiguïté mémoire
+        Current_State = np.ascontiguousarray(Current_State)
+        Next_State = model_step_func(Current_State, params, N_p, Adj, C_r, D)
+        Next_State = np.ascontiguousarray(Next_State)
+        Trajectory[t] = Next_State
+        Current_State = Next_State
+
     return Trajectory
 
 
 @numba.jit(nopython=True)
-def fhn_derivatives(State, params, Adj, N_p,C_r, D):
+def fhn_derivatives(State, params, N_p,Adj,C_r, D):
     """
     Computes the derivative dS/dt for a system of oscillators.
     State shape: (N_nodes, 3) -> col 0 is v_e (voltage of active node), col 1 is g (recovery), col 2 is v_p (voltage of passive node)
@@ -101,39 +110,44 @@ def fhn_derivatives(State, params, Adj, N_p,C_r, D):
     g = State[:, 1]
     v_p = State[:, 2]
     
-    K = params['K']
-    A = params['A']
-    Eps = params['Eps']
-    alpha = params['alpha']
-    V_RP = params['V_RP']
+    K = params[3]
+    A = params[0]
+    Eps = params[2]
+    alpha = params[1]
+    V_RP = params[4]
 
 
     dState = np.empty_like(State)
-    # dv_e/dt = Av_e(v_e-alpha)(1-v_e)-g+n_pC_r(V_p-V_e) - DL(V_e)
-    dState[:, 0] = A*np.multiply(v_e,np.multiply((v_e-alpha*np.ones(len(v_e))),(1-v_e)))-g+N_p*C_r*(v_p-v_e) - D*coupling_func(State, eps, Adj, Model= 'FN')
-    # dg/dt = Eps(v_e-g)
-    dState[:, 1] = Eps*(v_e-g)
-    # dv_p/dt = K(V_RP-v_p)-C_r(v_p-v_e)
-    dState[:,2] = K*(V_RP*np.ones(len(v_p))-v_p)-C_r*np.identity(len(v_p))*(v_p-v_e)
+    # Termes de couplage
+    coupling_term = coupling_func(State, 0, Adj, 'FN')  
+
+    # dv_e/dt = A*v_e*(v_e-alpha)*(1-v_e) - g + N_p*C_r*(v_p-v_e) - D*coupling_term[:,0]
+    dState[:, 0] = A * v_e * (v_e - alpha) * (1 - v_e) - g + (N_p @ (C_r * (v_p - v_e))) - D * coupling_term[:, 0]
+
+    # dg/dt = Eps(v_e - g)
+    dState[:, 1] = Eps * (v_e - g)
+
+    # dv_p/dt = K(V_RP - v_p) - C_r(v_p - v_e)
+    dState[:, 2] = K * (V_RP - v_p) - C_r * (v_p - v_e)
     return dState
 
 
 @numba.jit(nopython=True)
-def step_fhn_rk4(State, params):
+def step_fhn_rk4(State, params, N_p, Adj,C_r,D):
     """
     Performs one RK4 step.
     Matches signature: (State, params) -> New_State
     """
-    dt = params[4]  # We assume dt is stored in the params array
+    dt = params[5]  # We assume dt is stored in the params array
     # RK4 Integration Logic
     # k1 = f(y)
-    k1 = fhn_derivatives(State, params)
+    k1 = fhn_derivatives(State, params, N_p,Adj,C_r,D)
     # k2 = f(y + 0.5*dt*k1)
-    k2 = fhn_derivatives(State + 0.5 * dt * k1, params)
+    k2 = fhn_derivatives(State + 0.5 * dt * k1, params, N_p, Adj, C_r, D)
     # k3 = f(y + 0.5*dt*k2)
-    k3 = fhn_derivatives(State + 0.5 * dt * k2, params)
+    k3 = fhn_derivatives(State + 0.5 * dt * k2, params, N_p, Adj, C_r, D)
     # k4 = f(y + dt*k3)
-    k4 = fhn_derivatives(State + dt * k3, params)
+    k4 = fhn_derivatives(State + dt * k3, params, N_p, Adj, C_r, D)
     # y_new = y + (dt/6) * (k1 + 2k2 + 2k3 + k4)
     State_next = State + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
     return State_next
@@ -197,5 +211,3 @@ def evolution_vec(X_0, Y_0, N, list_ab, Eps, Adjacence):
         # This slice (a row) is contiguous by default!
         X_c, Y_c = transfo_coupling_vec(X[t, :], Y[t, :], Eps, Adjacence)
     return X, Y
-
-print("Hello")

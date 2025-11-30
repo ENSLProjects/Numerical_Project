@@ -8,6 +8,7 @@ from .buildgraph import (
     local_connect_lorentz,
     connexion_normal_random_NUMBA,
     connexion_normal_deterministic,
+    add_passive_nodes
 )
 from .evolution import (
     transfo_coupling_vec,
@@ -16,7 +17,8 @@ from .evolution import (
     get_coupling_operator,
     coupling_func,
     step_fhn_rk4,
-    step_henon
+    step_henon,
+    fhn_derivatives
 )
 
 from .measure import (
