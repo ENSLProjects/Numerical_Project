@@ -2,15 +2,33 @@
 
 # ================ Library
 from .buildgraph import (
-    pos_nodes_uniform,  # noqa: F401
-    norm_multi, # noqa: F401
-    local_connect_gaussian, # noqa: F401
-    local_connect_lorentz, # noqa: F401
-    connexion_normal_random_NUMBA, # noqa: F401
-    connexion_normal_deterministic, # noqa: F401
+    pos_nodes_uniform,
+    norm_multi,
+    local_connect_gaussian,
+    local_connect_lorentz,
+    connexion_normal_random_NUMBA,
+    connexion_normal_deterministic,
+    add_passive_nodes
 )
-from .evolution import transfo_coupling_vec, evolution_vec  # noqa: F401
-from .measure import MSD, MSD_inverse, find_settling_time, prepare_data  # noqa: F401
+from .evolution import (
+    transfo_coupling_vec,
+    evolution_vec,
+    evolve_system,
+    get_coupling_operator,
+    coupling_func,
+    step_fhn_rk4,
+    step_henon,
+    fhn_derivatives
+)
+
+from .measure import (
+    MSD,
+    MSD_inverse,
+    find_settling_time,
+    prepare_data,
+    print_simulation_report,
+    get_simulation_path
+)
 
 __all__ = [
     "pos_nodes_uniform",
@@ -19,6 +37,17 @@ __all__ = [
     "local_connect_lorentz",
     "connexion_normal_random_NUMBA",
     "connexion_normal_deterministic",
-    "find_settling_time", 
-    "prepare_data"
+    "find_settling_time",
+    "prepare_data",
+    "transfo_coupling_vec",
+    "evolution_vec",
+    "MSD",
+    "MSD_inverse",
+    "evolve_system",
+    "coupling_func",
+    "step_fhn_rk4",
+    "step_henon",
+    "get_coupling_operator",
+    "print_simulation_report",
+    "get_simulation_path"
 ]
