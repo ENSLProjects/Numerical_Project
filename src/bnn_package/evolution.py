@@ -29,87 +29,119 @@ def get_coupling_operator(Adjacence):
 @numba.jit(
     nopython=True
 )  # option mode "fastmath=True" can be swith on if data are clean enough
-def coupling_func(State, eps, Norm_Adj):
+def coupling_func(State, eps, Adj, Model):
     """
     Applies diffusive coupling to the State.
 
     State: (N_nodes, Dimension)
+    Model : type of coupling : 'Henon' or 'FN'
     Norm_Adj: Pre-computed (N_nodes, N_nodes) matrix
     """
-    interaction = (
-        Norm_Adj @ State
-    )  # For sparse or huge network (more than 1000 nodes with only few neighbors by node use an explicit for loop with numba)
-    State_new = (1.0 - eps) * State + eps * interaction
+
+    if Model == "Henon":
+        Adj = get_coupling_operator(Adj)
+        interaction = (
+            Adj @ State
+        )  # For sparse or huge network (more than 1000 nodes with only few neighbors by node use an explicit for loop with numba)
+        State_new = (1.0 - eps) * State + eps * interaction
+    if Model == "FN":
+        degrees = np.sum(Adj, axis=1)
+        Deg = np.diag(degrees)
+        L = Deg - Adj
+        State_new = np.zeros(State.shape)
+        State_new[:, 0] = L @ State[:, 0]
+        State_new[:, 1] = State[:, 1]
+        State_new[:, 2] = State[:, 2]
     return State_new
 
 
 @numba.jit(nopython=True)
-def evolve_system(
-    State_0, N_steps, params, model_step_func, coupling_func, coupling_op, eps
-):
+def evolve_system(State_0, N_steps, params, model_step_func, eps, N_p, Adj, C_r, D):
     """
-    Main generic solver. 
+    Main generic solver.
 
     State_0 = Initial conditions
     N_steps = length of the simulation (total time)
     params = matrix of parameters for a given system
-    model_step_function = dynamical system's function 
+    model_step_function = dynamical system's function
     coupling_func = function defining the coupling
-    coupling_op = operator needed for the coupling_func 
-    eps = value of the coupling 
+    coupling_op = operator needed for the coupling_func
+    eps = value of the coupling
 
     return the tensor of evolution state with the shape (N_steps, n_nodes, dim)
     """
     n_nodes, dim = State_0.shape
     Trajectory = np.zeros((N_steps, n_nodes, dim))
-    Trajectory[0, :, :] = State_0
-    # .copy() here ensures Current_State is contiguous in memory to start with.
-    Current_State = Trajectory[0, :, :].copy()
-    Current_State = coupling_func(Current_State, eps, coupling_op)
+    Trajectory[0] = State_0.copy()
+
+    Current_State = State_0.copy()
+
     for t in range(1, N_steps):
-        Next_State = model_step_func(Current_State, params)
-        Trajectory[t, :, :] = Next_State
-        Current_State = coupling_func(Next_State, eps, coupling_op)
+        # Assure la contiguïté mémoire
+        Current_State = np.ascontiguousarray(Current_State)
+        Next_State = model_step_func(Current_State, params, N_p, Adj, C_r, D)
+        Next_State = np.ascontiguousarray(Next_State)
+        Trajectory[t] = Next_State
+        Current_State = Next_State
+
     return Trajectory
 
 
 @numba.jit(nopython=True)
-def fhn_derivatives(State, params):
+def fhn_derivatives(State, params, N_p, Adj, C_r, D):
     """
     Computes the derivative dS/dt for a system of oscillators.
-    State shape: (N_nodes, 2) -> col 0 is v (voltage), col 1 is w (recovery)
-    Params: [a, b, tau, I_ext, dt] (Note: dt is not used here, but passed in params)
+    State shape: (N_nodes, 3) -> col 0 is v_e (voltage of active node), col 1 is g (recovery), col 2 is v_p (voltage of passive node)
+    Params: bibliothèque (Note: dt is not used here, but passed in params)
+    A : adjacency matrix (N*N)
+    N_p : diagonal matrix -> number of passive node for each active node
     """
-    v = State[:, 0]
-    w = State[:, 1]
-    a = params[0]
-    b = params[1]
-    tau = params[2]
-    I_ext = params[3]
+    v_e = State[:, 0]
+    g = State[:, 1]
+    v_p = State[:, 2]
+
+    K = params[3]
+    A = params[0]
+    Eps = params[2]
+    alpha = params[1]
+    V_RP = params[4]
+
     dState = np.empty_like(State)
-    # dv/dt = v - v^3/3 - w + I
-    dState[:, 0] = v - (v**3 / 3.0) - w + I_ext
-    # dw/dt = (v + a - b*w) / tau
-    dState[:, 1] = (v + a - b * w) / tau
+    # Termes de couplage
+    coupling_term = coupling_func(State, 0, Adj, "FN")
+
+    # dv_e/dt = A*v_e*(v_e-alpha)*(1-v_e) - g + N_p*C_r*(v_p-v_e) - D*coupling_term[:,0]
+    dState[:, 0] = (
+        A * v_e * (v_e - alpha) * (1 - v_e)
+        - g
+        + (N_p @ (C_r * (v_p - v_e)))
+        - D * coupling_term[:, 0]
+    )
+
+    # dg/dt = Eps(v_e - g)
+    dState[:, 1] = Eps * (v_e - g)
+
+    # dv_p/dt = K(V_RP - v_p) - C_r(v_p - v_e)
+    dState[:, 2] = K * (V_RP - v_p) - C_r * (v_p - v_e)
     return dState
 
 
 @numba.jit(nopython=True)
-def step_fhn_rk4(State, params):
+def step_fhn_rk4(State, params, N_p, Adj, C_r, D):
     """
     Performs one RK4 step.
     Matches signature: (State, params) -> New_State
     """
-    dt = params[4]  # We assume dt is stored in the params array
+    dt = params[5]  # We assume dt is stored in the params array
     # RK4 Integration Logic
     # k1 = f(y)
-    k1 = fhn_derivatives(State, params)
+    k1 = fhn_derivatives(State, params, N_p, Adj, C_r, D)
     # k2 = f(y + 0.5*dt*k1)
-    k2 = fhn_derivatives(State + 0.5 * dt * k1, params)
+    k2 = fhn_derivatives(State + 0.5 * dt * k1, params, N_p, Adj, C_r, D)
     # k3 = f(y + 0.5*dt*k2)
-    k3 = fhn_derivatives(State + 0.5 * dt * k2, params)
+    k3 = fhn_derivatives(State + 0.5 * dt * k2, params, N_p, Adj, C_r, D)
     # k4 = f(y + dt*k3)
-    k4 = fhn_derivatives(State + dt * k3, params)
+    k4 = fhn_derivatives(State + dt * k3, params, N_p, Adj, C_r, D)
     # y_new = y + (dt/6) * (k1 + 2k2 + 2k3 + k4)
     State_next = State + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
     return State_next

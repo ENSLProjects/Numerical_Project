@@ -1,0 +1,49 @@
+# .pre-commit-config.yaml
+
+# This tells pre-commit to stop running if a tool fails (saves time)
+fail_fast: true
+
+repos:
+  # ------------------------------------------------------------------
+  # 1. ARCHITECTURE & HYGIENE (File limits, huge data, broken links)
+  # ------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0 # Updated to v5.0.0 to fix the "deprecated stage names" warning
+    hooks:
+      - id: trailing-whitespace       # Cleans up invisible spaces
+      - id: end-of-file-fixer         # Ensures files end correctly
+      - id: check-yaml                # Validates this file and others
+      - id: check-toml                # Validates pyproject.toml syntax
+      - id: check-added-large-files   # STOPS you from committing huge data files (common in science)
+        args: ['--maxkb=2000']        # Limit set to 2MB. Anything larger belongs in .gitignore
+
+  # ------------------------------------------------------------------
+  # 2. PYTHON STRICT FORMATTING (The "Ruff" Magic)
+  # ------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.7
+    hooks:
+      # LINT: Checks for bugs, unused imports, and bad coding patterns
+      - id: ruff
+        args: [ --fix ]
+      # FORMAT: Rewrites your code to be perfectly aligned (like Black)
+      - id: ruff-format
+
+  # ------------------------------------------------------------------
+  # 3. PROJECT CONFIGURATION (pyproject.toml)
+  # ------------------------------------------------------------------
+  - repo: https://github.com/ComPWA/mirrors-taplo
+    rev: v0.9.3 # Updated to the correct mirror for pre-commit
+    hooks:
+      # Formats your pyproject.toml so it looks professional
+      - id: taplo-format
+        args: ["--option", "reorder_keys=true"]
+
+  # ------------------------------------------------------------------
+  # 4. PACKAGE METADATA VALIDATION
+  # ------------------------------------------------------------------
+  - repo: https://github.com/abravalheri/validate-pyproject
+    rev: v0.24.1
+    hooks:
+      # Ensures your project metadata (version, dependencies) is valid
+      - id: validate-pyproject
