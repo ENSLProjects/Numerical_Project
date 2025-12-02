@@ -27,7 +27,7 @@ from .measure import (
     find_settling_time,
     prepare_data,
     print_simulation_report,
-    get_simulation_path,
+    get_simulation_path
 )
 
 __all__ = [
