@@ -141,3 +141,24 @@ def connexion_normal_deterministic(pos, rng: Generator, std: float):
     np.fill_diagonal(connectivity, 0)
     return connectivity
 
+
+def add_passive_nodes(G, f, rng: Generator):
+    """
+    Ajoute des nœuds passifs à un graphe G selon une loi de Poisson de moyenne f.
+
+    Args:
+        G (nx.graph): Graphe d'entrée (nœuds actifs).
+        f (float): Moyenne de la loi de Poisson pour le nombre de nœuds passifs par nœud actif.
+
+    Returns:
+        a tensor: Nouveau graphe avec nœuds actifs + passifs.
+    """
+
+    new_G = G.copy()
+
+    N_p = rng.poisson(f, size=len(G.nodes()))
+    for active_node in G.nodes():
+        n_p = rng.poisson(f)
+        new_G.nodes[active_node]["passives"] = n_p
+
+    return new_G, N_p

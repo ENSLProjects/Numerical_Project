@@ -1,5 +1,6 @@
+
 # Numerical_Project
-Simulation of a biological neural network with a random graph, compute the transfert entropy with respect to a time lack and nodes indexes in order to detect a phase transition in the graph. 
+Simulation of a biological neural network with a random graph, compute the transfert entropy with respect to a time lack and nodes indexes in order to detect a phase transition in the graph.
 
 # ⚙️ Installation and Environment Setup
 
@@ -44,8 +45,8 @@ brew install gsl fftw
 ./configure CFLAGS=-I/opt/homebrew/include LDFLAGS=-L/opt/homebrew/lib
 ```
 
-## Step 3: Compile for python 
+## Step 3: Compile for python
 
 ```bash
-make python 
+make python
 ```

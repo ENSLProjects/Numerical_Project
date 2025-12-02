@@ -89,7 +89,10 @@ FullData = evolve_system(
 t_end = time.time()
 
 print(
-    "\n" + 20 * "-" + ">" + f" SIMULATION SUCCESFULLY COMPLETED in {t_end - t_start:.3f}s"
+    "\n"
+    + 20 * "-"
+    + ">"
+    + f" SIMULATION SUCCESFULLY COMPLETED in {t_end - t_start:.3f}s"
 )
 
 Datacuted = FullData[transitoire:, :, :]
