@@ -37,6 +37,7 @@ dev = [
   "pip>=25.3",
   "pre-commit>=4.5.0",
   "rise>=5.7.1",
+  "ruff>=0.14.7",
   "setuptools>=80.9.0",
   "sphinx>=8.2.3",
 ]
@@ -54,4 +55,5 @@ testpaths = ["tests"]
 [tool.ruff]
 # Exclude the 'run' folder from linting to avoid notebook headaches for now
 exclude = ["run/notebook"]
+force-exclude = true
 line-length = 88
