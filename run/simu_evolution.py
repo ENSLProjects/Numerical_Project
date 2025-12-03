@@ -26,11 +26,11 @@ import json
 #!#!#!#!#!# Graph building
 
 rng = default_rng(1234567890)
-N_nodes = 500  # number of nodes
+N_nodes = 1000  # number of nodes
 (xmax, ymax) = (10.0, 10.0)
 pos = pos_nodes_uniform(N_nodes, xmax, ymax, rng)
-std = 1.5
-transitoire = 1000
+std = 0.25
+transitoire = 0
 f = 3  # mean of the Poisson law (o average: number of passive nodes for one active node)
 
 #!#!#!#!#!# Time evolution
@@ -42,7 +42,7 @@ alpha = 0.2  # 1
 Eps = 0.08  # 2
 K = 0.25  # 3
 Vrp = 1.5  # 4
-dt = 0.001  # 5
+dt = 0.01  # 5
 C_r = 1.5  # coupling between active and passive nodes?
 parameterFhN = [A, alpha, Eps, K, Vrp, dt]
 
@@ -55,9 +55,8 @@ parameterHenon = [a, b]  # a and b in this order
 #!#!#!#!#!# Remaining parameters
 
 model = "FhN"
-N_time = 20000
+N_time = 10000
 type_diff = "Laplacian"
-run_name = "debugging simulation"
 
 #!#!#!#!#!# Dictionnaries
 
@@ -89,7 +88,6 @@ params_dict = {
     "epsilon": Eps,
     "time length simulation": N_time,
     "model": model,
-    "run name": run_name,
     "how to diffuse": type_diff,
     "parameters_model": parameters,
 }
@@ -133,7 +131,7 @@ print(
 
 print(60 * "=")
 print_simulation_report(
-    Adjacency, run_name, fast_mode=False
+    Adjacency, fast_mode=False
 )  # comment this line to avoid topology analysis
 
 print(20 * "-" + ">" + " READY TO LAUNCH ")
@@ -153,12 +151,12 @@ print("=" * 60)
 
 Datacuted = FullData[transitoire:, :, :]
 
-graph_filename = f"graph_{model}_{run_name}.graphml"
+graph_filename = f"graph_{model}_{N_nodes}_{Eps}.graphml"
 full_graph_path = os.path.join(GRAPH_FOLDER, graph_filename)
 
 nx.write_graphml(Graph_passive, full_graph_path)
 
-print(f"\nGraph topology saved to: {full_graph_path}")
+print(f"\nGraph saved to: {full_graph_path}")
 
 with h5py.File(save_path, "a") as f:
     # grp = f.create_group(run_name), to add structure replace current f by grp

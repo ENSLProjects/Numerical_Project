@@ -5,15 +5,13 @@
 from bnn_package import corrupted_simulation, pull_out_full_data, prepare_data
 import os
 import numpy as np
+import matplotlib.pyplot as plt
 
 # ======================= CONFIGURATION
 
 MY_FOLDER = "data_simulation"
-filename = "2025-12-03/FhN_20-49-40_eps0.08_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
+filename = "2025-12-03/FhN_22-15-15_eps0.08_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
 file_path = os.path.join(MY_FOLDER, filename)
-
-# The specific run name you used inside the script
-run_name = "debugging simulation"
 
 # --- PATCH DE COMPATIBILITÉ (Indispensable pour Numpy récent) ---
 if not hasattr(np, "int"):
@@ -23,11 +21,30 @@ if not hasattr(np, "float"):
 
 # ======================= DIAGNOSIS and LOADING
 
-corrupted_simulation(file_path, run_name)
+corrupted_simulation(file_path)
 
-Full_Data = pull_out_full_data(file_path, run_name)
+Full_Data = pull_out_full_data(file_path)
+
+if Full_Data is None:
+    raise ValueError(
+        f"Failed to load data from {file_path}. Check if the file exists and is valid."
+    )
 
 Trajectory = Full_Data["time trajectory"]
+
+fig, ax = plt.subplots()
+ax.plot(Trajectory[:, 4, 0], label=f"Node {4}")
+ax.plot(Trajectory[:, 5, 0], label=f"Node {5}")
+ax.plot(Trajectory[:, 6, 0], label=f"Node {6}")
+ax.plot(Trajectory[:, 10, 0], label=f"Node {10}")
+ax.plot(Trajectory[:, 100, 0], label=f"Node {100}")
+ax.plot(Trajectory[:, 500, 0], label=f"Node {500}")
+ax.plot(Trajectory[:, 930, 0], label=f"Node {930}")
+ax.set_xlabel("Time Step")
+ax.set_ylabel("Voltage $V_e$")
+ax.legend()
+ax.grid(True)
+plt.show()
 
 # ======================= ENTROPY
 
