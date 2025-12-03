@@ -1,7 +1,7 @@
 # .pre-commit-config.yaml
 
 # This tells pre-commit to stop running if a tool fails (saves time)
-fail_fast: true
+fail_fast: false
 
 repos:
   # ------------------------------------------------------------------
