@@ -6,6 +6,7 @@ from bnn_package import evolution
 
 # ======================= Fixtures (Setup)
 
+
 @pytest.fixture
 def graph_params():
     """Provides standard parameters for graph building tests."""
@@ -24,7 +25,9 @@ def evo_params():
         "adj": np.eye(m),  # Self-connected for simplicity
     }
 
+
 # ======================= Tests for evolution.py
+
 
 def test_transfo_coupling_vec_dimensions(evo_params):
     """Ensure the coupling transformation maintains input shapes"""

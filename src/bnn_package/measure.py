@@ -254,8 +254,8 @@ def get_simulation_path(base_folder, sim_name, parameters=None):
         # Filter for crucial params to keep filename short
         if "epsilon" in parameters:
             filename += f"_eps{parameters['epsilon']:.2f}"
-        if "alpha" in parameters:
-            filename += f"_a{parameters['alpha']:.2f}"
+        if "how to diffuse" in parameters:
+            filename += "_" + parameters["how to diffuse"]
         if "time_length_simulation" in parameters:
             filename += f"_finaltime{parameters['time_length_simulation']:.2f}"
         if "number of nodes" in parameters:

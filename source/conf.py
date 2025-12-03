@@ -6,21 +6,23 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = 'Biological Neural Networks'
-copyright = '2025, Roman BEAUVALLET Constantin DEUMIER'
-author = 'Roman BEAUVALLET Constantin DEUMIER'
+project = "Biological Neural Networks"
+copyright = "2025, Roman BEAUVALLET Constantin DEUMIER"
+author = "Roman BEAUVALLET Constantin DEUMIER"
 release = '"0.1.0"'
 
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ["sphinx.ext.autodoc",
+extensions = [
+    "sphinx.ext.autodoc",
     "sphinx.ext.autosummary",
     "sphinx.ext.napoleon",
     "sphinx.ext.autosectionlabel",
-    "sphinx.ext.viewcode"]
+    "sphinx.ext.viewcode",
+]
 
-templates_path = ['_templates']
+templates_path = ["_templates"]
 exclude_patterns = []
 
 autodoc_typehints = "description"
@@ -30,5 +32,5 @@ napoleon_numpy_docstring = True
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = 'alabaster'
-html_static_path = ['_static']
+html_theme = "alabaster"
+html_static_path = ["_static"]

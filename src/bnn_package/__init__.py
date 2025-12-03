@@ -11,8 +11,6 @@ from .buildgraph import (
     add_passive_nodes,
 )
 from .evolution import (
-    transfo_coupling_vec,
-    evolution_vec,
     evolve_system,
     get_coupling_operator,
     coupling_func,
@@ -39,8 +37,6 @@ __all__ = [
     "connexion_normal_deterministic",
     "find_settling_time",
     "prepare_data",
-    "transfo_coupling_vec",
-    "evolution_vec",
     "MSD",
     "MSD_inverse",
     "evolve_system",
