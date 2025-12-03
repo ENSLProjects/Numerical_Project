@@ -10,6 +10,10 @@ from tabulate import tabulate
 import time
 from datetime import datetime
 from pathlib import Path
+import os
+import h5py
+from typing import cast
+import json
 
 # ======================= Functions
 
@@ -17,6 +21,9 @@ from pathlib import Path
 def prepare_data(arr):
     """
     Prépare les données pour la lib C Entropy.
+
+    La sortie respecte ces règles :
+
     Règle 1 : Format (1, N_samples) obligatoire (donc 1 ligne, N colonnes).
     Règle 2 : Mémoire contiguë (C-contiguous).
     Règle 3 : Type float64 (double).
@@ -148,10 +155,6 @@ def Synchronized_error(X, Y, N_nodes, time):  # not easily vectorizable
     return 2 * error / N_nodes / (N_nodes - 1)
 
 
-def Synchronized_error_mean():
-    return 4
-
-
 def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
     """
     Computes graph topology metrics and prints a table to the console.
@@ -265,3 +268,112 @@ def get_simulation_path(base_folder, sim_name, parameters=None):
 
     # 4. Join folder and filename
     return output_dir / filename
+
+
+def get_data(group, key):
+    """
+    Helper to safely extract a dataset and cast it for the linter.
+    """
+    return cast(h5py.Dataset, group[key])[:]
+
+
+def corrupted_simulation(file_path, run_name):
+    """
+    Verifies that the tensor of data has no NaN or Inf data.
+
+    Args:
+        file_path (str): Relative path to the simulation file.
+        run_name (str): The specific run key (group) to check inside the file.
+    """
+    filename = os.path.basename(file_path)
+
+    if not os.path.exists(file_path):
+        print(f"CRITICAL ERROR: File not found at {file_path}")
+        return False  # Return False to indicate failure
+
+    with h5py.File(file_path, "r") as f:
+        print(f"--- File found: {filename} ---")
+
+        if run_name not in f:
+            print(f"Error: Run '{run_name}' not found. Available: {list(f.keys())}")
+            return False
+        else:
+            grp = f[run_name]
+
+            # 1. LOAD DATA
+            try:
+                trajectory = get_data(grp, "trajectory")
+            except KeyError:
+                print("Error: 'trajectory' dataset not found in this run.")
+                return False
+
+            print("\n" + "=" * 30)
+            print("   NUMERICAL DIAGNOSTIC")
+            print("=" * 30)
+
+            has_nan = np.isnan(trajectory).any()
+            has_inf = np.isinf(trajectory).any()
+            max_val = np.max(trajectory)
+            min_val = np.min(trajectory)
+
+            print(f"Data Shape:    {trajectory.shape}")
+            print(f"Contains NaNs? {has_nan}")
+            print(f"Contains Infs? {has_inf}")
+
+            if has_nan or has_inf:
+                print(
+                    "\n[CONCLUSION] ❌ The simulation EXPLODED. Try to change the range kutta time step."
+                )
+                return True  # True means it IS corrupted
+            elif max_val == 0 and min_val == 0:
+                print("\n[CONCLUSION] ⚠️ The simulation is FLAT (All Zeros).")
+                return True
+            else:
+                print("\n[CONCLUSION] ✅ Data looks valid.")
+                return False  # False means NOT corrupted (Healthy)
+
+
+def pull_out_full_data(file_path, run_name):
+    """return the data with logs
+
+    Args:
+        file_path (_type_ = str): path of the file to read
+        run_name (_type_ = str): name of the run that created the file red
+    """
+    filename = os.path.basename(file_path)
+    if not os.path.exists(file_path):
+        print(f"Error: File not found at {file_path}")
+    else:
+        with h5py.File(file_path, "r") as f:
+            print(f"--- File: {filename} ---")
+
+            if run_name not in f:
+                print(
+                    f"Error: Run '{run_name}' not found. Available runs: {list(f.keys())}"
+                )
+            else:
+                grp = f[run_name]
+                print(f"Reading Group: {run_name}")
+                param_str = grp.attrs["parameters_model"]
+                # Convert string back to dictionary
+                # Decode if bytes, otherwise convert to string
+                if isinstance(param_str, bytes):
+                    param_str = param_str.decode("utf-8")
+                else:
+                    param_str = str(param_str)
+                parameters = json.loads(param_str)
+
+                trajectory = get_data(grp, "trajectory")
+                adjacency = get_data(grp, "adjacency")
+                # passive_counts = get_data(grp, "passive_nodes_count")
+
+                print("\n[Data Shapes]")
+                print(f"  - Trajectory: {trajectory.shape} (Time, Nodes, Dims)")
+                print(f"  - Adjacency:  {adjacency.shape}")
+
+                # 3. LOAD METADATA (Attributes)
+                print("\n[Simulation Parameters]")
+                for key, val in grp.attrs.items():
+                    print(f"  - {key}: {val}")
+    data = {"time trajectory": trajectory, "parameters": parameters}
+    return data

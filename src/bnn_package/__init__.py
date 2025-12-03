@@ -26,6 +26,9 @@ from .measure import (
     prepare_data,
     print_simulation_report,
     get_simulation_path,
+    get_data,
+    corrupted_simulation,
+    pull_out_full_data,
 )
 
 __all__ = [
@@ -48,4 +51,7 @@ __all__ = [
     "get_simulation_path",
     "add_passive_nodes",
     "fhn_derivatives",
+    "get_data",
+    "corrupted_simulation",
+    "pull_out_full_data",
 ]

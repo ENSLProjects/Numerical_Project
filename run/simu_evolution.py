@@ -19,13 +19,14 @@ from numpy.random import default_rng
 import time
 import h5py
 import os
+import json
 
 # ======================= PARAMETERS
 
 #!#!#!#!#!# Graph building
 
 rng = default_rng(1234567890)
-N_nodes = 1000  # number of nodes
+N_nodes = 500  # number of nodes
 (xmax, ymax) = (10.0, 10.0)
 pos = pos_nodes_uniform(N_nodes, xmax, ymax, rng)
 std = 1.5
@@ -41,7 +42,7 @@ alpha = 0.2  # 1
 Eps = 0.08  # 2
 K = 0.25  # 3
 Vrp = 1.5  # 4
-dt = 0.1  # 5
+dt = 0.001  # 5
 C_r = 1.5  # coupling between active and passive nodes?
 parameterFhN = [A, alpha, Eps, K, Vrp, dt]
 
@@ -56,7 +57,7 @@ parameterHenon = [a, b]  # a and b in this order
 model = "FhN"
 N_time = 20000
 type_diff = "Laplacian"
-run_name = "trial_for_analysis"
+run_name = "debugging simulation"
 
 #!#!#!#!#!# Dictionnaries
 
@@ -85,6 +86,7 @@ elif model == "FhN":
 params_dict = {
     "number of nodes": N_nodes,
     "std graph": std,
+    "epsilon": Eps,
     "time length simulation": N_time,
     "model": model,
     "run name": run_name,
@@ -144,12 +146,10 @@ FullData = evolve_system(
 )
 t_end = time.time()
 
-print(
-    "\n"
-    + 20 * "-"
-    + ">"
-    + f" SIMULATION SUCCESFULLY COMPLETED in {t_end - t_start:.3f}s"
-)
+print("\n" + 20 * "-" + ">" + " SIMULATION SUCCESFULLY COMPLETED")
+
+print(f"\n[System] Simulation completed in {t_end - t_start:.3f}s")
+print("=" * 60)
 
 Datacuted = FullData[transitoire:, :, :]
 
@@ -157,26 +157,38 @@ graph_filename = f"graph_{model}_{run_name}.graphml"
 full_graph_path = os.path.join(GRAPH_FOLDER, graph_filename)
 
 nx.write_graphml(Graph_passive, full_graph_path)
-print(f"Graph topology saved to: {full_graph_path}")
+
+print(f"\nGraph topology saved to: {full_graph_path}")
 
 with h5py.File(save_path, "a") as f:
-    # Create a Group (like a folder)
-    grp = f.create_group(run_name)
-
-    # Save the heavy data with compression
-    # 'chunks' allows efficient slicing later
-    dset = grp.create_dataset(
+    # grp = f.create_group(run_name), to add structure replace current f by grp
+    f.create_dataset(
         "trajectory", data=Datacuted, compression="gzip", compression_opts=4
     )
+    f.create_dataset("adjacency", data=Adjacency, compression="gzip")
+    f.create_dataset("passive_nodes_count", data=N_p, compression="gzip")
 
-    # Save Adjacency
-    grp.create_dataset("adjacency", data=Adjacency, compression="gzip")
-
-    grp.create_dataset("passive nodes", data=N_p, compression="gzip")
-
-    # === THE KEY FEATURE: METADATA ===
-    # Store parameters as attributes of the group
+    # Save Metadata (Attributes) - ROBUST VERSION
     for key, value in params_dict.items():
-        grp.attrs[key] = value
+        # Case A: It is a Dictionary (like 'parameters_model') -> Save as JSON String
+        if isinstance(value, dict):
+            f.attrs[key] = json.dumps(value)
 
-print(f"\n DATA SUCCESSFULLY SAVED in {MY_FOLDER}")
+        # Case B: It is a List or Numpy Array -> Save as a separate Dataset
+        elif isinstance(value, (list, np.ndarray)):
+            # Only create if it doesn't exist to avoid errors
+            if key not in f:
+                f.create_dataset(key, data=value)
+
+        # Case C: It is a standard Number or String -> Save as Attribute
+        else:
+            try:
+                f.attrs[key] = value
+            except TypeError:
+                # Fallback: Convert to string if HDF5 complains (e.g. specialized objects)
+                f.attrs[key] = str(value)
+
+    f.attrs["associated_graph_file"] = graph_filename
+    f.attrs["associated_graph_path"] = full_graph_path
+
+print(f"\nData successfully saved in {MY_FOLDER}")
