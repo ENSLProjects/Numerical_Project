@@ -55,15 +55,15 @@ parameterHenon = [a, b]  # a and b in this order
 
 model = "FhN"
 N_time = 20000
-eps = 0.3
 type_diff = "Laplacian"
-run_name = "trial"
+run_name = "trial_for_analysis"
 
 #!#!#!#!#!# Dictionnaries
 
 if model == "Henon":
     param = np.array(parameterHenon, dtype=np.float64)
     model_step_func = step_henon
+    parameters = {"coupling": Eps, "a": a, "b": b}
 elif model == "FhN":
     param = np.array(parameterFhN, dtype=np.float64)
     model_step_func = step_fhn_rk4
@@ -71,17 +71,25 @@ elif model == "FhN":
     State_0[:, 0] = 0.1 + 0.1 * rng.standard_normal(N_nodes)  # v_e
     State_0[:, 1] = 0.3 + 0.1 * rng.standard_normal(N_nodes)  # g
     State_0[:, 2] = 1.0 + 0.1 * rng.standard_normal(N_nodes)
+    parameters = {
+        "A": A,
+        "alpha": alpha,
+        "coupling_active": Eps,
+        "K": K,
+        "Vrp": Vrp,
+        "coupling_passive": C_r,
+        "time_step rk4": dt,
+        "average Poisson": f,
+    }
 
 params_dict = {
     "number of nodes": N_nodes,
+    "std graph": std,
     "time length simulation": N_time,
-    "epsilon": eps,
     "model": model,
-    "model parameters": param,
     "run name": run_name,
-    "average Poisson": f,
     "how to diffuse": type_diff,
-    "parameters_model": param,
+    "parameters_model": parameters,
 }
 
 MY_FOLDER = "data_simulation"
