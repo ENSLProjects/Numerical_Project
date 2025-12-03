@@ -39,7 +39,7 @@ f = 3  # mean of the Poisson law (o average: number of passive nodes for one act
 
 A = 3.0  # 0
 alpha = 0.2  # 1
-Eps = 0.08  # 2
+Eps = 2.1  # 2
 K = 0.25  # 3
 Vrp = 1.5  # 4
 dt = 0.01  # 5

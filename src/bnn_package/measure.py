@@ -14,6 +14,8 @@ import os
 import h5py
 from typing import cast
 import json
+import entropy.entropy as ee
+from tqdm import tqdm
 
 # ======================= Functions
 
@@ -374,3 +376,46 @@ def pull_out_full_data(file_path):
 
     data = {"time trajectory": trajectory, "parameters": parameters}
     return data
+
+
+def compute_te_over_lags(x, y, lags, n_real=5, n_eff=4096):
+    """
+    Mimics 'compute_over_scales' but iterates over LAG instead of STRIDE.
+
+    Args:
+        x, y: Input signals (1, T)
+        lags: Array of lags to test
+        n_real: Number of random realizations (for statistics)
+        n_eff: Length of each random subset
+
+    Returns:
+        means: Array of mean TE per lag
+        stds: Array of std TE per lag
+    """
+    means = np.zeros(len(lags))
+    stds = np.zeros(len(lags))
+    ee.multithreading(do_what="auto")
+    print(f"Computing TE over {len(lags)} lags with {n_real} realizations each...")
+    for i, tau in enumerate(tqdm(lags)):
+        # We need to collect 'n_real' individual values to compute STD.
+        # So we loop in Python to get the distribution.
+
+        current_lag_values = []
+        for _ in range(n_real):
+            val = ee.compute_TE(
+                x,
+                y,
+                n_embed_x=1,
+                n_embed_y=1,
+                stride=1,  # Fixed Stride (Scale 1)
+                lag=tau,  # Variable Lag
+                k=5,
+                N_eff=n_eff,
+                N_real=1,  # One realization at a time to build statistics
+            )[0]  # [0] = First algorithm (Kraskov)
+
+            current_lag_values.append(val)
+        means[i] = np.mean(current_lag_values)
+        stds[i] = np.std(current_lag_values)
+
+    return means, stds

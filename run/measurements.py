@@ -2,10 +2,16 @@
 
 # ======================= LIBRARIES
 
-from bnn_package import corrupted_simulation, pull_out_full_data, prepare_data
+from bnn_package import (
+    corrupted_simulation,
+    pull_out_full_data,
+    prepare_data,
+    compute_te_over_lags,
+)
 import os
 import numpy as np
 import matplotlib.pyplot as plt
+import entropy.entropy as ee
 
 # ======================= CONFIGURATION
 
@@ -49,12 +55,59 @@ plt.show()
 # ======================= ENTROPY
 
 # ------------ parameters
-node = 10
+node_1 = 10
+node_2 = 33
 lag = 1
 kNN = 5
 n_embeded = 1
-N = 4096
+N_eff = 4096  # number of points on each subset measurement
+N_real = 2  # number of subsets
 # ------------- data
-ve = prepare_data(
-    Trajectory[:, node, 0]
-)  # for now we only care about the tension of the active nodes
+
+ee.get_sampling(verbosity=1)
+
+LAGS = np.arange(1, 1001, 10, dtype=int)
+
+# --- RUN ---
+try:
+    x, y = (
+        prepare_data(Trajectory[:, node_1, 0]),
+        prepare_data(Trajectory[:, node_2, 0]),
+    )
+    # for now we only care about the tension of the active nodes
+
+    te_mean, te_std = compute_te_over_lags(
+        x,
+        y,
+        LAGS,
+        n_real=50,  # 20 random samples per lag
+        n_eff=4096,  # 4000 points per sample
+    )
+
+    # --- PLOT (with Error Bars) ---
+    plt.figure(figsize=(10, 6))
+
+    # Plot with error bars
+    plt.errorbar(
+        LAGS,
+        te_mean,
+        yerr=te_std,
+        fmt="-o",
+        color="crimson",
+        ecolor="gray",
+        capsize=3,
+        label=f"TE({node_1} $\\to$ {node_2})",
+    )
+
+    # Calculate Integral (Sum)
+    te_integral = np.sum(te_mean)
+
+    plt.title(f"Transfer Entropy Lag Profile\nIntegral = {te_integral:.4f}")
+    plt.xlabel("Lag $\\tau$ (time steps)")
+    plt.ylabel("Transfer Entropy (nats)")
+    plt.grid(True, alpha=0.3)
+    plt.legend()
+    plt.show()
+
+except Exception as e:
+    print(f"Error: {e}")

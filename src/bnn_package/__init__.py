@@ -29,6 +29,7 @@ from .measure import (
     get_data,
     corrupted_simulation,
     pull_out_full_data,
+    compute_te_over_lags,
 )
 
 __all__ = [
@@ -54,4 +55,5 @@ __all__ = [
     "get_data",
     "corrupted_simulation",
     "pull_out_full_data",
+    "compute_te_over_lags",
 ]
