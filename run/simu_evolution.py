@@ -19,6 +19,7 @@ from numpy.random import default_rng
 import time
 import h5py
 import os
+import json
 
 # ======================= PARAMETERS
 
@@ -28,8 +29,8 @@ rng = default_rng(1234567890)
 N_nodes = 1000  # number of nodes
 (xmax, ymax) = (10.0, 10.0)
 pos = pos_nodes_uniform(N_nodes, xmax, ymax, rng)
-std = 1.5
-transitoire = 1000
+std = 0.25
+transitoire = 0
 f = 3  # mean of the Poisson law (o average: number of passive nodes for one active node)
 
 #!#!#!#!#!# Time evolution
@@ -41,7 +42,7 @@ alpha = 0.2  # 1
 Eps = 0.08  # 2
 K = 0.25  # 3
 Vrp = 1.5  # 4
-dt = 0.1  # 5
+dt = 0.01  # 5
 C_r = 1.5  # coupling between active and passive nodes?
 parameterFhN = [A, alpha, Eps, K, Vrp, dt]
 
@@ -54,16 +55,15 @@ parameterHenon = [a, b]  # a and b in this order
 #!#!#!#!#!# Remaining parameters
 
 model = "FhN"
-N_time = 20000
-eps = 0.3
+N_time = 10000
 type_diff = "Laplacian"
-run_name = "trial"
 
 #!#!#!#!#!# Dictionnaries
 
 if model == "Henon":
     param = np.array(parameterHenon, dtype=np.float64)
     model_step_func = step_henon
+    parameters = {"coupling": Eps, "a": a, "b": b}
 elif model == "FhN":
     param = np.array(parameterFhN, dtype=np.float64)
     model_step_func = step_fhn_rk4
@@ -71,17 +71,25 @@ elif model == "FhN":
     State_0[:, 0] = 0.1 + 0.1 * rng.standard_normal(N_nodes)  # v_e
     State_0[:, 1] = 0.3 + 0.1 * rng.standard_normal(N_nodes)  # g
     State_0[:, 2] = 1.0 + 0.1 * rng.standard_normal(N_nodes)
+    parameters = {
+        "A": A,
+        "alpha": alpha,
+        "coupling_active": Eps,
+        "K": K,
+        "Vrp": Vrp,
+        "coupling_passive": C_r,
+        "time_step rk4": dt,
+        "average Poisson": f,
+    }
 
 params_dict = {
     "number of nodes": N_nodes,
+    "std graph": std,
+    "epsilon": Eps,
     "time length simulation": N_time,
-    "epsilon": eps,
     "model": model,
-    "model parameters": param,
-    "run name": run_name,
-    "average Poisson": f,
     "how to diffuse": type_diff,
-    "parameters_model": param,
+    "parameters_model": parameters,
 }
 
 MY_FOLDER = "data_simulation"
@@ -123,7 +131,7 @@ print(
 
 print(60 * "=")
 print_simulation_report(
-    Adjacency, run_name, fast_mode=False
+    Adjacency, fast_mode=True
 )  # comment this line to avoid topology analysis
 
 print(20 * "-" + ">" + " READY TO LAUNCH ")
@@ -136,39 +144,53 @@ FullData = evolve_system(
 )
 t_end = time.time()
 
-print(
-    "\n"
-    + 20 * "-"
-    + ">"
-    + f" SIMULATION SUCCESFULLY COMPLETED in {t_end - t_start:.3f}s"
-)
+print("\n" + 20 * "-" + ">" + " SIMULATION SUCCESFULLY COMPLETED")
+
+print(f"\n[System] Simulation completed in {t_end - t_start:.3f}s")
+print("=" * 60)
 
 Datacuted = FullData[transitoire:, :, :]
 
-graph_filename = f"graph_{model}_{run_name}.graphml"
+graph_filename = f"graph_{model}_{N_nodes}_{Eps}.graphml"
 full_graph_path = os.path.join(GRAPH_FOLDER, graph_filename)
 
 nx.write_graphml(Graph_passive, full_graph_path)
-print(f"Graph topology saved to: {full_graph_path}")
+
+print(f"\nGraph saved to: {full_graph_path}")
 
 with h5py.File(save_path, "a") as f:
-    # Create a Group (like a folder)
-    grp = f.create_group(run_name)
-
-    # Save the heavy data with compression
-    # 'chunks' allows efficient slicing later
-    dset = grp.create_dataset(
-        "trajectory", data=Datacuted, compression="gzip", compression_opts=4
+    # grp = f.create_group(run_name), to add structure replace current f by grp
+    f.create_dataset(
+        "trajectory",
+        data=Datacuted.astype(np.float32),
+        compression="gzip",
+        compression_opts=4,
+        shuffle=True,
     )
+    f.create_dataset("adjacency", data=Adjacency, compression="gzip")
+    f.create_dataset("passive_nodes_count", data=N_p, compression="gzip")
 
-    # Save Adjacency
-    grp.create_dataset("adjacency", data=Adjacency, compression="gzip")
-
-    grp.create_dataset("passive nodes", data=N_p, compression="gzip")
-
-    # === THE KEY FEATURE: METADATA ===
-    # Store parameters as attributes of the group
+    # Save Metadata (Attributes) - ROBUST VERSION
     for key, value in params_dict.items():
-        grp.attrs[key] = value
+        # Case A: It is a Dictionary (like 'parameters_model') -> Save as JSON String
+        if isinstance(value, dict):
+            f.attrs[key] = json.dumps(value)
 
-print(f"\n DATA SUCCESSFULLY SAVED in {MY_FOLDER}")
+        # Case B: It is a List or Numpy Array -> Save as a separate Dataset
+        elif isinstance(value, (list, np.ndarray)):
+            # Only create if it doesn't exist to avoid errors
+            if key not in f:
+                f.create_dataset(key, data=value)
+
+        # Case C: It is a standard Number or String -> Save as Attribute
+        else:
+            try:
+                f.attrs[key] = value
+            except TypeError:
+                # Fallback: Convert to string if HDF5 complains (e.g. specialized objects)
+                f.attrs[key] = str(value)
+
+    f.attrs["associated_graph_file"] = graph_filename
+    f.attrs["associated_graph_path"] = full_graph_path
+
+print(f"\nData successfully saved in {MY_FOLDER}")

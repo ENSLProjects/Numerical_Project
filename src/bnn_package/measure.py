@@ -10,6 +10,10 @@ from tabulate import tabulate
 import time
 from datetime import datetime
 from pathlib import Path
+import os
+import h5py
+from typing import cast
+import json
 
 # ======================= Functions
 
@@ -17,6 +21,9 @@ from pathlib import Path
 def prepare_data(arr):
     """
     Prépare les données pour la lib C Entropy.
+
+    La sortie respecte ces règles :
+
     Règle 1 : Format (1, N_samples) obligatoire (donc 1 ligne, N colonnes).
     Règle 2 : Mémoire contiguë (C-contiguous).
     Règle 3 : Type float64 (double).
@@ -148,11 +155,7 @@ def Synchronized_error(X, Y, N_nodes, time):  # not easily vectorizable
     return 2 * error / N_nodes / (N_nodes - 1)
 
 
-def Synchronized_error_mean():
-    return 4
-
-
-def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
+def print_simulation_report(adj_matrix, fast_mode=False):
     """
     Computes graph topology metrics and prints a table to the console.
 
@@ -199,7 +202,6 @@ def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
     # We create a list of lists
     table_data = [
         ["Metric", "Value", "Description"],
-        ["Simulation ID", sim_name, "Run Identifier"],
         ["Edges (E)", int(num_edges), "Total Connections"],
         ["Avg Degree (<k>)", f"{avg_degree:.4f}", "Avg neighbors per node"],
         ["Density", f"{density:.4f}", "Actual/Possible edges"],
@@ -265,3 +267,110 @@ def get_simulation_path(base_folder, sim_name, parameters=None):
 
     # 4. Join folder and filename
     return output_dir / filename
+
+
+def get_data(container, key):
+    """
+    Helper to safely extract a dataset and cast it for the linter.
+    """
+    return cast(h5py.Dataset, container[key])[:]
+
+
+def corrupted_simulation(file_path):
+    """
+    Verifies that the tensor of data has no NaN or Inf data.
+
+    Args:
+        file_path (str): Relative path to the simulation file.
+    """
+    filename = os.path.basename(file_path)
+
+    if not os.path.exists(file_path):
+        print(f"CRITICAL ERROR: File not found at {file_path}")
+        return True  # Return True (Corrupted/Error) so the script knows to stop
+
+    with h5py.File(file_path, "r") as f:
+        print(f"--- File found: {filename} ---")
+
+        # 1. LOAD DATA DIRECTLY FROM ROOT
+        try:
+            trajectory = get_data(f, "trajectory")
+        except KeyError:
+            print("Error: 'trajectory' dataset not found at file root.")
+            return True
+
+        print("\n" + "=" * 30)
+        print("   NUMERICAL DIAGNOSTIC")
+        print("=" * 30)
+
+        has_nan = np.isnan(trajectory).any()
+        has_inf = np.isinf(trajectory).any()
+        max_val = np.max(trajectory)
+        min_val = np.min(trajectory)
+
+        print(f"Data Shape:    {trajectory.shape}" + "(Time, Node, Physical variable)")
+        print(f"Contains NaNs? {has_nan}")
+        print(f"Contains Infs? {has_inf}")
+
+        if has_nan or has_inf:
+            print(
+                "\n[CONCLUSION] ❌ The simulation EXPLODED. Try to change the Runge-Kutta time step."
+            )
+            return True  # True means it IS corrupted
+        elif max_val == 0 and min_val == 0:
+            print("\n[CONCLUSION] ⚠️ The simulation is FLAT (All Zeros).")
+            return True
+        else:
+            print("\n[CONCLUSION] ✅ Data looks valid.")
+            return False  # False means NOT corrupted (Healthy)
+
+
+def pull_out_full_data(file_path):
+    """return the data with logs
+
+    Args:
+        file_path (str): path of the file to read
+    """
+    filename = os.path.basename(file_path)
+
+    if not os.path.exists(file_path):
+        print(f"Error: File not found at {file_path}")
+        return None
+
+    with h5py.File(file_path, "r") as f:
+        print(f"--- File: {filename} ---")
+
+        # 1. READ ATTRIBUTES FROM ROOT
+        # Check if parameters exist
+        if "parameters_model" not in f.attrs:
+            print("Warning: 'parameters_model' not found in attributes.")
+            parameters = {}
+        else:
+            param_str = f.attrs["parameters_model"]
+
+            # Convert string back to dictionary
+            if isinstance(param_str, bytes):
+                param_str = param_str.decode("utf-8")
+            else:
+                param_str = str(param_str)
+
+            try:
+                parameters = json.loads(param_str)
+            except json.JSONDecodeError:
+                print("Error: Could not decode parameters JSON.")
+                parameters = {}
+
+        # 2. READ DATASETS FROM ROOT
+        try:
+            trajectory = get_data(f, "trajectory")
+            # adjacency = get_data(f, "adjacency") # Uncomment if needed
+        except KeyError as e:
+            print(f"Error: Missing dataset {e}")
+            return None
+
+        print("\n[Simulation Parameters]")
+        for key, val in f.attrs.items():
+            print(f"  - {key}: {val}")
+
+    data = {"time trajectory": trajectory, "parameters": parameters}
+    return data
