@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # ======================= CONFIGURATION
 
 MY_FOLDER = "data_simulation"
-filename = "2025-12-03/FhN_22-15-15_eps0.08_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
+filename = "2025-12-03/FhN_22-43-55_eps0.08_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
 file_path = os.path.join(MY_FOLDER, filename)
 
 # --- PATCH DE COMPATIBILITÉ (Indispensable pour Numpy récent) ---

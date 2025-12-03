@@ -131,7 +131,7 @@ print(
 
 print(60 * "=")
 print_simulation_report(
-    Adjacency, fast_mode=False
+    Adjacency, fast_mode=True
 )  # comment this line to avoid topology analysis
 
 print(20 * "-" + ">" + " READY TO LAUNCH ")
@@ -161,7 +161,11 @@ print(f"\nGraph saved to: {full_graph_path}")
 with h5py.File(save_path, "a") as f:
     # grp = f.create_group(run_name), to add structure replace current f by grp
     f.create_dataset(
-        "trajectory", data=Datacuted, compression="gzip", compression_opts=4
+        "trajectory",
+        data=Datacuted.astype(np.float32),
+        compression="gzip",
+        compression_opts=4,
+        shuffle=True,
     )
     f.create_dataset("adjacency", data=Adjacency, compression="gzip")
     f.create_dataset("passive_nodes_count", data=N_p, compression="gzip")

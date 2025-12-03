@@ -159,6 +159,7 @@ venv.bak/
 # mkdocs documentation
 /site
 run/notebook/Présentation.ipynb
+Plots/*
 # mypy
 .mypy_cache/
 .dmypy.json
