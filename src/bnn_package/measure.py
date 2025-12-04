@@ -10,32 +10,10 @@ from tabulate import tabulate
 import time
 from datetime import datetime
 from pathlib import Path
-import os
-import h5py
-from typing import cast
-import json
+import entropy.entropy as ee
+from tqdm import tqdm
 
 # ======================= Functions
-
-
-def prepare_data(arr):
-    """
-    Prépare les données pour la lib C Entropy.
-
-    La sortie respecte ces règles :
-
-    Règle 1 : Format (1, N_samples) obligatoire (donc 1 ligne, N colonnes).
-    Règle 2 : Mémoire contiguë (C-contiguous).
-    Règle 3 : Type float64 (double).
-    """
-    # Si c'est un vecteur plat (N,), on le passe en (1, N)
-    if arr.ndim == 1:
-        arr = arr.reshape(1, -1)
-    # Si c'est (N, 1), on transpose en (1, N)
-    elif arr.shape[0] > arr.shape[1]:
-        arr = arr.T
-
-    return np.ascontiguousarray(arr, dtype=np.float64)
 
 
 @numba.jit(nopython=True)
@@ -269,108 +247,37 @@ def get_simulation_path(base_folder, sim_name, parameters=None):
     return output_dir / filename
 
 
-def get_data(container, key):
+def compute_te_over_lags(
+    x, y, lags, n_real=10, n_eff=4096, kNN=5, embedding=(2, 2), Theiler_correction=15
+):
     """
-    Helper to safely extract a dataset and cast it for the linter.
+    Computes TE over a range of lags with explicit Theiler correction.
     """
-    return cast(h5py.Dataset, container[key])[:]
+    means = np.zeros(len(lags))
+    stds = np.zeros(len(lags))
+    ee.multithreading(do_what="auto")
+    print(f"Computing TE over {len(lags)} lags (Range: {lags[0]}-{lags[-1]})...")
+    for i, tau in enumerate(tqdm(lags)):
+        current_lag_values = []
 
+        # We loop manually to capture the STD (distribution) of the TE
+        for _ in range(n_real):
+            val = ee.compute_TE(
+                x,
+                y,
+                n_embed_x=embedding[0],
+                n_embed_y=embedding[1],
+                stride=1,
+                lag=tau,
+                k=kNN,
+                N_eff=n_eff,
+                N_real=1,  # We handle realizations manually here for the std
+                Theiler=Theiler_correction,
+            )[0]
 
-def corrupted_simulation(file_path):
-    """
-    Verifies that the tensor of data has no NaN or Inf data.
+            current_lag_values.append(val)
 
-    Args:
-        file_path (str): Relative path to the simulation file.
-    """
-    filename = os.path.basename(file_path)
+        means[i] = np.mean(current_lag_values)
+        stds[i] = np.std(current_lag_values)
 
-    if not os.path.exists(file_path):
-        print(f"CRITICAL ERROR: File not found at {file_path}")
-        return True  # Return True (Corrupted/Error) so the script knows to stop
-
-    with h5py.File(file_path, "r") as f:
-        print(f"--- File found: {filename} ---")
-
-        # 1. LOAD DATA DIRECTLY FROM ROOT
-        try:
-            trajectory = get_data(f, "trajectory")
-        except KeyError:
-            print("Error: 'trajectory' dataset not found at file root.")
-            return True
-
-        print("\n" + "=" * 30)
-        print("   NUMERICAL DIAGNOSTIC")
-        print("=" * 30)
-
-        has_nan = np.isnan(trajectory).any()
-        has_inf = np.isinf(trajectory).any()
-        max_val = np.max(trajectory)
-        min_val = np.min(trajectory)
-
-        print(f"Data Shape:    {trajectory.shape}" + "(Time, Node, Physical variable)")
-        print(f"Contains NaNs? {has_nan}")
-        print(f"Contains Infs? {has_inf}")
-
-        if has_nan or has_inf:
-            print(
-                "\n[CONCLUSION] ❌ The simulation EXPLODED. Try to change the Runge-Kutta time step."
-            )
-            return True  # True means it IS corrupted
-        elif max_val == 0 and min_val == 0:
-            print("\n[CONCLUSION] ⚠️ The simulation is FLAT (All Zeros).")
-            return True
-        else:
-            print("\n[CONCLUSION] ✅ Data looks valid.")
-            return False  # False means NOT corrupted (Healthy)
-
-
-def pull_out_full_data(file_path):
-    """return the data with logs
-
-    Args:
-        file_path (str): path of the file to read
-    """
-    filename = os.path.basename(file_path)
-
-    if not os.path.exists(file_path):
-        print(f"Error: File not found at {file_path}")
-        return None
-
-    with h5py.File(file_path, "r") as f:
-        print(f"--- File: {filename} ---")
-
-        # 1. READ ATTRIBUTES FROM ROOT
-        # Check if parameters exist
-        if "parameters_model" not in f.attrs:
-            print("Warning: 'parameters_model' not found in attributes.")
-            parameters = {}
-        else:
-            param_str = f.attrs["parameters_model"]
-
-            # Convert string back to dictionary
-            if isinstance(param_str, bytes):
-                param_str = param_str.decode("utf-8")
-            else:
-                param_str = str(param_str)
-
-            try:
-                parameters = json.loads(param_str)
-            except json.JSONDecodeError:
-                print("Error: Could not decode parameters JSON.")
-                parameters = {}
-
-        # 2. READ DATASETS FROM ROOT
-        try:
-            trajectory = get_data(f, "trajectory")
-            # adjacency = get_data(f, "adjacency") # Uncomment if needed
-        except KeyError as e:
-            print(f"Error: Missing dataset {e}")
-            return None
-
-        print("\n[Simulation Parameters]")
-        for key, val in f.attrs.items():
-            print(f"  - {key}: {val}")
-
-    data = {"time trajectory": trajectory, "parameters": parameters}
-    return data
+    return means, stds
