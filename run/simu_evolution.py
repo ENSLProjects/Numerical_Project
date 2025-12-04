@@ -29,7 +29,6 @@ N_nodes = 1000  # number of nodes
 (xmax, ymax) = (10.0, 10.0)
 pos = pos_nodes_uniform(N_nodes, xmax, ymax, rng)
 std = 0.25
-transitoire = 0
 f = 3  # mean of the Poisson law (o average: number of passive nodes for one active node)
 
 #!#!#!#!#!# Time evolution
@@ -44,6 +43,8 @@ Vrp = 1.5  # 4
 dt = 0.01  # 5
 C_r = 1.5  # coupling between active and passive nodes?
 parameterFhN = [A, alpha, Eps, K, Vrp, dt]
+
+transitoire = int(500 / dt)  # physical transition time in s
 
 # ============ HENON
 
