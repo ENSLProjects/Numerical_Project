@@ -10,6 +10,7 @@ from .buildgraph import (
     connexion_normal_deterministic,
     add_passive_nodes,
 )
+
 from .evolution import (
     evolve_system,
     get_coupling_operator,
@@ -19,16 +20,20 @@ from .evolution import (
     fhn_derivatives,
 )
 
+from .data_processing import (
+    get_data,
+    corrupted_simulation,
+    pull_out_full_data,
+    prepare_data,
+    save_dict_to_hdf5,
+)
+
 from .measure import (
     MSD,
     MSD_inverse,
     find_settling_time,
-    prepare_data,
     print_simulation_report,
     get_simulation_path,
-    get_data,
-    corrupted_simulation,
-    pull_out_full_data,
     compute_te_over_lags,
 )
 
@@ -56,4 +61,5 @@ __all__ = [
     "corrupted_simulation",
     "pull_out_full_data",
     "compute_te_over_lags",
+    "save_dict_to_hdf5",
 ]

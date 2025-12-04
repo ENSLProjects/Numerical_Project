@@ -12,6 +12,7 @@ from bnn_package import (
     step_henon,
     print_simulation_report,
     get_simulation_path,
+    save_dict_to_hdf5,
 )
 import networkx as nx
 import numpy as np
@@ -19,7 +20,6 @@ from numpy.random import default_rng
 import time
 import h5py
 import os
-import json
 
 # ======================= PARAMETERS
 
@@ -156,41 +156,18 @@ full_graph_path = os.path.join(GRAPH_FOLDER, graph_filename)
 
 nx.write_graphml(Graph_passive, full_graph_path)
 
-print(f"\nGraph saved to: {full_graph_path}")
-
-with h5py.File(save_path, "a") as f:
-    # grp = f.create_group(run_name), to add structure replace current f by grp
+with h5py.File(save_path, "w") as f:
+    # Save the heavy simulation data normally
     f.create_dataset(
         "trajectory",
         data=Datacuted.astype(np.float32),
         compression="gzip",
-        compression_opts=4,
         shuffle=True,
     )
-    f.create_dataset("adjacency", data=Adjacency, compression="gzip")
-    f.create_dataset("passive_nodes_count", data=N_p, compression="gzip")
 
-    # Save Metadata (Attributes) - ROBUST VERSION
-    for key, value in params_dict.items():
-        # Case A: It is a Dictionary (like 'parameters_model') -> Save as JSON String
-        if isinstance(value, dict):
-            f.attrs[key] = json.dumps(value)
+    # Save ALL metadata (params_dict) recursively in one line
+    # We save it under a group called "config" to keep it tidy,
+    # or use "/" to save at root.
+    save_dict_to_hdf5(f, params_dict)
 
-        # Case B: It is a List or Numpy Array -> Save as a separate Dataset
-        elif isinstance(value, (list, np.ndarray)):
-            # Only create if it doesn't exist to avoid errors
-            if key not in f:
-                f.create_dataset(key, data=value)
-
-        # Case C: It is a standard Number or String -> Save as Attribute
-        else:
-            try:
-                f.attrs[key] = value
-            except TypeError:
-                # Fallback: Convert to string if HDF5 complains (e.g. specialized objects)
-                f.attrs[key] = str(value)
-
-    f.attrs["associated_graph_file"] = graph_filename
-    f.attrs["associated_graph_path"] = full_graph_path
-
-print(f"\nData successfully saved in {MY_FOLDER}")
+print(f"\nGraph saved to: {full_graph_path}")

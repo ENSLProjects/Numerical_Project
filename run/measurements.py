@@ -30,22 +30,24 @@ if not hasattr(np, "float"):
 corrupted_simulation(file_path)
 
 Full_Data = pull_out_full_data(file_path)
-
 if Full_Data is None:
-    raise ValueError(
-        f"Failed to load data from {file_path}. Check if the file exists and is valid."
-    )
-
+    raise ValueError(f"Failed to load data from {file_path}")
 Trajectory = Full_Data["time trajectory"]
+# Note: pull_out_full_data returns the dict under the key "parameters"
+All_Params = Full_Data["parameters"]
+Parameters_model = All_Params["parameters_model"]
+rk4_time = Parameters_model["time_step rk4"]
+final_time = All_Params["time length simulation"]
+real_time = rk4_time * np.arange(Trajectory.shape[0])
 
 fig, ax = plt.subplots()
-ax.plot(Trajectory[:, 4, 0], label=f"Node {4}")
-ax.plot(Trajectory[:, 5, 0], label=f"Node {5}")
-ax.plot(Trajectory[:, 6, 0], label=f"Node {6}")
-ax.plot(Trajectory[:, 10, 0], label=f"Node {10}")
-ax.plot(Trajectory[:, 100, 0], label=f"Node {100}")
-ax.plot(Trajectory[:, 500, 0], label=f"Node {500}")
-ax.plot(Trajectory[:, 930, 0], label=f"Node {930}")
+ax.plot(real_time, Trajectory[:, 4, 0], label=f"Node {4}")
+ax.plot(real_time, Trajectory[:, 5, 0], label=f"Node {5}")
+ax.plot(real_time, Trajectory[:, 6, 0], label=f"Node {6}")
+ax.plot(real_time, Trajectory[:, 10, 0], label=f"Node {10}")
+ax.plot(real_time, Trajectory[:, 100, 0], label=f"Node {100}")
+ax.plot(real_time, Trajectory[:, 500, 0], label=f"Node {500}")
+ax.plot(real_time, Trajectory[:, 930, 0], label=f"Node {930}")
 ax.set_xlabel("Time Step")
 ax.set_ylabel("Voltage $V_e$")
 ax.legend()
@@ -55,24 +57,24 @@ plt.show()
 # ======================= ENTROPY
 
 # ------------ parameters
-node_1 = 10
-node_2 = 33
+node_source = 5
+node_target = 500
 lag = 1
 kNN = 5
-n_embeded = 1
+n_embeded = 2
 N_eff = 4096  # number of points on each subset measurement
-N_real = 2  # number of subsets
+N_real = 20  # number of subsets
 # ------------- data
 
 ee.get_sampling(verbosity=1)
 
-LAGS = np.arange(1, 1001, 10, dtype=int)
+LAGS = np.arange(1, 10001, 100, dtype=int)
 
 # --- RUN ---
 try:
     x, y = (
-        prepare_data(Trajectory[:, node_1, 0]),
-        prepare_data(Trajectory[:, node_2, 0]),
+        prepare_data(Trajectory[:, node_source, 0]),
+        prepare_data(Trajectory[:, node_target, 0]),
     )
     # for now we only care about the tension of the active nodes
 
@@ -80,8 +82,10 @@ try:
         x,
         y,
         LAGS,
-        n_real=50,  # 20 random samples per lag
-        n_eff=4096,  # 4000 points per sample
+        n_real=N_real,
+        n_eff=N_eff,
+        kNN=kNN,
+        embedding=(n_embeded, n_embeded),
     )
 
     # --- PLOT (with Error Bars) ---
@@ -96,7 +100,7 @@ try:
         color="crimson",
         ecolor="gray",
         capsize=3,
-        label=f"TE({node_1} $\\to$ {node_2})",
+        label=f"TE({node_source} $\\to$ {node_target})",
     )
 
     # Calculate Integral (Sum)
