@@ -4,16 +4,15 @@ authors = [
   { name = "Constantin Deumier", email = "constantin.deumier@ens-lyon.fr" },
 ]
 dependencies = [
-  "datetime>=6.0",
+  "cma>=4.4.1",
   "entropy",
   "h5py>=3.15.1",
-  "ipykernel>=7.1.0",
   "matplotlib>=3.10.7",
   "networkx>=3.5",
   "numba>=0.62.1",
   "numpy>=2.3.5",
-  "pathlib>=1.0.1",
   "pytest>=9.0.1",
+  "scikit-learn>=1.7.2",
   "scipy>=1.16.3",
   "tabulate>=0.9.0",
   "tqdm>=4.67.1",

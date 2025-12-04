@@ -65,7 +65,7 @@ def coupling_func(State_voltage_active, eps, Coupling_op, Model, type_diff: str)
 
 
 @numba.jit(nopython=True)
-def fhn_derivatives(State, params, N_p, Coupling_op, C_r, type_diff):
+def fhn_derivatives(State, params, N_p, Coupling_op, C_r, type_diff, I_input=0):
     """
     Computes the derivative dS/dt for a system of oscillators.
     State shape: (N_nodes, 3) -> col 0 is v_e (voltage of active node), col 1 is g (recovery), col 2 is v_p (voltage of passive node)
@@ -93,6 +93,7 @@ def fhn_derivatives(State, params, N_p, Coupling_op, C_r, type_diff):
         - g
         + ((C_r * (v_p - v_e)) * N_p)
         - coupling_term
+        + I_input
     )
 
     # dg/dt = Eps(v_e - g)
