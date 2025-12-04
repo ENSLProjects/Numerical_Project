@@ -1,11 +1,16 @@
 #!/usr/bin/env/python3
 import numpy as np
 import numba
+import matplotlib.pyplot as plt
 from sklearn.linear_model import Ridge
 from sklearn.metrics import accuracy_score
 import cma
+
 from bnn_package import evolution
 from bnn_package import buildgraph
+
+
+# ======================= PART 1: SOLVER (Unchanged) =======================
 
 
 @numba.jit(nopython=True)
@@ -15,77 +20,70 @@ def run_reservoir_epoch(
     steps = input_signal.shape[0]
     n_nodes = State_0.shape[0]
     dt = params[5]
-
     states_history = np.zeros((steps, n_nodes), dtype=np.float64)
-    current_state = State_0.copy()
+    current = State_0.copy()
 
     for t in range(steps):
-        u_t = np.ascontiguousarray(input_signal[t])
-        I_current = input_weights @ u_t
+        # I_injected = W_in @ u(t)
+        I_curr = input_weights @ np.ascontiguousarray(input_signal[t])
 
         k1 = evolution.fhn_derivatives(
-            current_state, params, N_p, Coupling_op, C_r, type_diff, I_current
+            current, params, N_p, Coupling_op, C_r, type_diff, I_curr
         )
         k2 = evolution.fhn_derivatives(
-            current_state + 0.5 * dt * k1,
-            params,
-            N_p,
-            Coupling_op,
-            C_r,
-            type_diff,
-            I_current,
+            current + 0.5 * dt * k1, params, N_p, Coupling_op, C_r, type_diff, I_curr
         )
         k3 = evolution.fhn_derivatives(
-            current_state + 0.5 * dt * k2,
-            params,
-            N_p,
-            Coupling_op,
-            C_r,
-            type_diff,
-            I_current,
+            current + 0.5 * dt * k2, params, N_p, Coupling_op, C_r, type_diff, I_curr
         )
         k4 = evolution.fhn_derivatives(
-            current_state + dt * k3, params, N_p, Coupling_op, C_r, type_diff, I_current
+            current + dt * k3, params, N_p, Coupling_op, C_r, type_diff, I_curr
         )
 
-        current_state = current_state + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-        states_history[t] = current_state[:, 0]
+        current += (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+        states_history[t] = current[:, 0]
 
     return states_history
 
 
-# ==============================================================================
-# PART 2: THE RESERVOIR
-# ==============================================================================
-
-
+# ======================= PART 2: RESERVOIR WITH I/O MASKS =======================
 class FhnReservoir:
-    def __init__(self, n_nodes, weighted_adjacency, fhn_params):
+    def __init__(
+        self, n_nodes, weighted_adjacency, fhn_params, input_nodes, readout_nodes
+    ):
         self.n_nodes = n_nodes
         self.A = weighted_adjacency
         self.params = fhn_params
-        # Important: We recalculate the Coupling Operator with the NEW weights
         self.coupling_op = evolution.get_coupling_operator(self.A, "Diffusive")
         self.N_p = np.zeros(n_nodes)
         self.C_r = 0.0
-        self.readout = Ridge(alpha=1e-5)
+        self.readout = Ridge(alpha=1e-3)  # Stronger regularization
+
+        # DEFINING THE GAP
+        self.input_node_indices = input_nodes  # e.g., [0,1,2]
+        self.readout_node_indices = readout_nodes  # e.g., [17,18,19]
+
         self.input_weights = None
 
-    def fit(self, X_signals, Y_labels, input_connectivity=0.3):
+    def fit(self, X_signals, Y_labels):
         input_dim = X_signals[0].shape[1]
-        rng_in = np.random.default_rng(42)
+        rng = np.random.default_rng(42)
 
+        # 1. Input Weights: ONLY project to 'input_node_indices'
         if self.input_weights is None:
-            self.input_weights = rng_in.normal(0, 5.0, (self.n_nodes, input_dim))
-            mask = rng_in.random((self.n_nodes, input_dim)) > input_connectivity
-            self.input_weights[mask] = 0.0
+            self.input_weights = np.zeros((self.n_nodes, input_dim))
+            # Random weights only for input zone
+            active_weights = rng.normal(
+                0, 10.0, (len(self.input_node_indices), input_dim)
+            )
+            self.input_weights[self.input_node_indices] = active_weights
 
         all_features = []
-        for signal in X_signals:
+        for sig in X_signals:
             state_0 = np.zeros((self.n_nodes, 3))
             states = run_reservoir_epoch(
                 state_0,
-                signal,
+                sig,
                 self.input_weights,
                 self.params,
                 self.N_p,
@@ -93,7 +91,14 @@ class FhnReservoir:
                 self.C_r,
                 "Diffusive",
             )
-            features = np.std(states[50:], axis=0)
+
+            # 2. Readout: ONLY see 'readout_node_indices'
+            # We ignore the activity of the input nodes!
+            # The signal MUST travel through the graph to be seen here.
+            readout_activity = states[50:, self.readout_node_indices]
+
+            # Feature: Standard Deviation of the Output Zone
+            features = np.std(readout_activity, axis=0)
             all_features.append(features)
 
         X_train = np.array(all_features)
@@ -102,11 +107,11 @@ class FhnReservoir:
 
     def predict(self, X_signals):
         all_features = []
-        for signal in X_signals:
+        for sig in X_signals:
             state_0 = np.zeros((self.n_nodes, 3))
             states = run_reservoir_epoch(
                 state_0,
-                signal,
+                sig,
                 self.input_weights,
                 self.params,
                 self.N_p,
@@ -114,152 +119,199 @@ class FhnReservoir:
                 self.C_r,
                 "Diffusive",
             )
-            features = np.std(states[50:], axis=0)
+            readout_activity = states[50:, self.readout_node_indices]
+            features = np.std(readout_activity, axis=0)
             all_features.append(features)
         return self.readout.predict(np.array(all_features))
 
 
-# ==============================================================================
-# PART 3: THE SYNAPTIC EVOLUTION LOOP
-# ==============================================================================
+# ======================= PART 3: VISUALIZATION & OBJECTIVE =======================
+def plot_synaptic_plasticity(history, filename="evolution_trajectories.png"):
+    history = np.abs(np.array(history))
+    plt.figure(figsize=(10, 6))
+    plt.plot(history, color="blue", alpha=0.15, linewidth=1)
+    plt.plot(
+        np.mean(history, axis=1), color="red", linewidth=2, linestyle="--", label="Mean"
+    )
+    plt.title("Synaptic Plasticity: The Bridge Builders")
+    plt.xlabel("Generation")
+    plt.ylabel("Weight Strength")
+    plt.grid(alpha=0.3)
+    plt.legend()
+    plt.savefig(filename, dpi=150)
+    plt.close()
 
 
-def objective_function_weights(
-    genome, base_adjacency, edge_indices, X_train, y_train, X_val, y_val, static_params
-):
-    """
-    Decodes GENOME -> WEIGHTS -> ADJACENCY MATRIX
-    """
-    N = static_params["n_nodes"]
+def plot_weight_distribution(history, filename="evolution_heatmap.png"):
+    history = np.abs(np.array(history))
+    bins = np.linspace(0, np.max(history) * 1.1, 50)
+    density = np.array([np.histogram(row, bins, density=True)[0] for row in history]).T
+    plt.figure(figsize=(10, 6))
+    plt.imshow(
+        density,
+        aspect="auto",
+        origin="lower",
+        cmap="magma",
+        extent=(0, len(history), bins[0], bins[-1]),
+    )
+    plt.colorbar(label="Density")
+    plt.title("Evolution of Weight Distribution")
+    plt.xlabel("Generation")
+    plt.ylabel("Weight")
+    plt.savefig(filename, dpi=150)
+    plt.close()
 
-    # 1. Map Genome (Weights) back to the Matrix
-    # We clone the base mask to keep the structure
-    Weighted_Adj = np.zeros_like(base_adjacency, dtype=np.float64)
 
-    # Apply weights to the specific edges that exist
-    # We take absolute value because negative adjacency is usually invalid in standard FhN diffusion
+def objective_function(genome, base_adj, edge_idx, X_train, y_train, X_val, y_val, ctx):
+    # Decode
+    W_Adj = np.zeros_like(base_adj, dtype=np.float64)
     weights = np.abs(genome)
+    W_Adj[edge_idx] = weights
+    W_Adj += W_Adj.T
 
-    # Assign weights to the upper triangle edges
-    rows, cols = edge_indices
-    Weighted_Adj[rows, cols] = weights
-
-    # Symmetrize (assuming undirected graph)
-    Weighted_Adj = Weighted_Adj + Weighted_Adj.T
-
-    # 2. Build Reservoir with this Weighted Matrix
-    res = FhnReservoir(N, Weighted_Adj, static_params["fhn_params"])
-
+    # Build Reservoir with GAP constraints
+    res = FhnReservoir(
+        ctx["n_nodes"],
+        W_Adj,
+        ctx["fhn_params"],
+        input_nodes=ctx["in_nodes"],
+        readout_nodes=ctx["out_nodes"],
+    )
     try:
-        # Train Readout
         res.fit(X_train, y_train)
-        # Validate
         preds = res.predict(X_val)
+        acc = accuracy_score(y_val, (preds > 0.5).astype(int))
 
-        preds_class = (preds > 0.5).astype(int)
-        acc = accuracy_score(y_val, preds_class)
-
-        # Optional: Add L1 penalty to encourage sparsity (pruning non-essential edges)
-        # loss = -accuracy + lambda * sum(|weights|)
-        sparsity_penalty = 0.001 * np.mean(weights)
-
-        return -(acc - sparsity_penalty)  # We minimize this
-
-    except ValueError:
+        # Penalize disconnection (Average weight shouldn't be 0)
+        # But we REMOVE the sparsity penalty to encourage bridges
+        return -acc
+    except Exception:
         return 10.0
 
 
-def run_evolutionary_optimization():
-    # --- 1. SETUP DATA ---
-    print(">>> Generating Synthetic Data...")
-    n_samples = 60
-    time_steps = 300
-    X_data = []
-    y_data = []
-    rng = np.random.default_rng(42)
+# ======================= PART 4: MAIN =======================
+def logistic_map_series(r, steps, x0):
+    """Generates chaotic time series"""
+    x = np.zeros(steps)
+    x[0] = x0
+    for i in range(steps - 1):
+        x[i + 1] = r * x[i] * (1 - x[i])
+    return x
 
+
+def run_evolutionary_optimization():
+    # --- 1. DATA (Logistic Map - Same as before) ---
+    print(">>> Generating HARD Data (Logistic Map)...")
+    n_samples = 80
+    steps = 400
+    X_data, y_data = [], []
     for i in range(n_samples):
-        t = np.linspace(0, 20, time_steps)
-        if i % 2 == 0:
-            sig = np.sin(t) * 2.0
-            target = 0
-        else:
-            sig = rng.normal(0, 1.0, time_steps)
-            target = 1
+        r = 3.7 if i % 2 == 0 else 3.9
+        target = 0 if i % 2 == 0 else 1
+        sig = logistic_map_series(r, steps, np.random.rand())
+        sig = (sig - 0.5) * 5.0
         X_data.append(sig.reshape(-1, 1))
         y_data.append(target)
-
     split = int(0.8 * n_samples)
     X_train, X_val = X_data[:split], X_data[split:]
     y_train, y_val = y_data[:split], y_data[split:]
 
-    # --- 2. INITIALIZE BASE TOPOLOGY ---
-    N_NODES = 20
-    print(f">>> Initializing Base Graph for {N_NODES} nodes...")
+    # --- 2. THE CANYON TOPOLOGY ---
+    N_NODES = 25
+    rng = np.random.default_rng(42)
 
-    # We use your buildgraph to create the "Skeleton"
-    # We place nodes randomly and connect them
-    pos = buildgraph.pos_nodes_uniform(N_NODES, 10.0, 10.0, rng)
-    # std=3.0 means reasonable connectivity
+    print(">>> Building The Canyon (Gap between In and Out)...")
+
+    # Custom Positioning to force separation
+    # Node 0-2 (Input)  -> Left Side (x=0)
+    # Node 3-21 (Hidden)-> Random Middle (x=2 to 8)
+    # Node 22-24 (Read) -> Right Side (x=10)
+    pos = np.zeros((2, N_NODES))
+
+    # Inputs at X=0, Spread along Y
+    pos[0, :3] = 0.0
+    pos[1, :3] = rng.uniform(0, 10, 3)
+
+    # Readouts at X=10, Spread along Y
+    pos[0, -3:] = 10.0
+    pos[1, -3:] = rng.uniform(0, 10, 3)
+
+    # Hidden Layer in the "Canyon"
+    pos[0, 3:-3] = rng.uniform(2.0, 8.0, N_NODES - 6)  # X between 2 and 8
+    pos[1, 3:-3] = rng.uniform(0, 10, N_NODES - 6)  # Y random
+
+    # Create Connectivity based on these positions
+    # sigma=2.5 ensures Input (x=0) CANNOT reach Output (x=10) directly.
+    # It must hop at least 3-4 times.
     Base_Adj = buildgraph.connexion_normal_deterministic(pos, rng, std=3.0)
 
-    # Identify the edges we can train (Upper Triangle only to enforce symmetry later)
-    # We only train edges that ALREADY EXIST (Base_Adj == 1)
+    # Define Zones
+    in_nodes = np.array([0, 1, 2])
+    out_nodes = np.array([N_NODES - 3, N_NODES - 2, N_NODES - 1])
+
+    # Verify no direct connection exists (Safety Check)
+    if np.any(Base_Adj[in_nodes][:, out_nodes]):
+        print("WARNING: Direct leak detected! Reducing sigma...")
+        Base_Adj = buildgraph.connexion_normal_deterministic(pos, rng, std=1.5)
+
     rows, cols = np.triu_indices(N_NODES, k=1)
-    existing_edges_mask = Base_Adj[rows, cols] > 0
+    mask = Base_Adj[rows, cols] > 0
+    edge_idx = (rows[mask], cols[mask])
+    n_edges = len(rows[mask])
 
-    trainable_rows = rows[existing_edges_mask]
-    trainable_cols = cols[existing_edges_mask]
-    edge_indices = (trainable_rows, trainable_cols)
+    print(f"    Nodes: {N_NODES}")
+    print(f"    Trainable Edges: {n_edges}")
+    print(f"    Input Nodes: {in_nodes}")
+    print(f"    Output Nodes: {out_nodes}")
 
-    num_trainable_edges = len(trainable_rows)
-    print(f"    Base Graph created. Found {num_trainable_edges} trainable edges.")
+    # Context
+    # eps=0.01: Weak coupling requires strong edges to propagate signal
+    fhn_params = np.array([1.0, 0.1, 0.01, 1.0, 0.0, 0.1])
+    ctx = {
+        "n_nodes": N_NODES,
+        "fhn_params": fhn_params,
+        "in_nodes": in_nodes,
+        "out_nodes": out_nodes,
+    }
 
-    # --- 3. CMA-ES SETUP ---
-    # Genome: One float value per trainable edge
-    initial_genome = np.ones(num_trainable_edges)  # Start with weight 1.0
+    # --- 3. EVOLUTION (Start from Darkness) ---
+    # Initialize weights to effectively ZERO.
+    # The bridge is strictly broken. The readout should see NOTHING (Acc ~50%).
+    # Evolution must 'turn on' the lights path by path.
+    initial_genome = np.ones(n_edges) * 1e-6
 
-    fhn_params = np.array([1.0, 0.1, 0.05, 1.0, 0.0, 0.1], dtype=np.float64)
-    static_context = {"n_nodes": N_NODES, "fhn_params": fhn_params}
+    weight_hist = []
+    # sigma0=0.5 allows the weights to jump up quickly if needed
+    es = cma.CMAEvolutionStrategy(initial_genome, 0.5, {"popsize": 24, "maxiter": 50})
 
-    print("\n>>> Starting Synaptic Weight Evolution")
-    es = cma.CMAEvolutionStrategy(initial_genome, 0.5, {"popsize": 12, "maxiter": 15})
-
+    print("\n>>> Starting Evolution (Expect ~50% accuracy at first)...")
     while not es.stop():
-        solutions = es.ask()
-        fitnesses = [
-            objective_function_weights(
-                s,
-                Base_Adj,
-                edge_indices,
-                X_train,
-                y_train,
-                X_val,
-                y_val,
-                static_context,
+        sols = es.ask()
+        # ABSOLUTE VALUE wrapper to ensure non-negative weights during trial
+        fits = [
+            objective_function(
+                np.abs(s), Base_Adj, edge_idx, X_train, y_train, X_val, y_val, ctx
             )
-            for s in solutions
+            for s in sols
         ]
-        es.tell(solutions, fitnesses)
+        es.tell(sols, fits)
 
-        best_score = -es.result.fbest
-        print(f"Gen {es.result.iterations}: Best Score = {best_score:.4f}")
+        best_acc = -es.result.fbest
+        weight_hist.append(es.result.xbest)
+        print(f"Gen {es.result.iterations}: Best Acc = {best_acc:.2%}")
 
-    print("\n>>> Evolution Complete.")
+        # Stop early if solved (to save time)
+        if best_acc > 0.99:
+            print("Solved!")
+            break
 
-    # Extract Best Graph
-    if es.result.xbest is not None:
-        best_weights = np.abs(es.result.xbest)
-        Final_Adj = np.zeros_like(Base_Adj, dtype=np.float64)
-        Final_Adj[edge_indices] = best_weights
-        Final_Adj = Final_Adj + Final_Adj.T
+    print(">>> Evolution Complete. Generating Plots...")
+    plot_synaptic_plasticity(weight_hist)
+    plot_weight_distribution(weight_hist)
 
-        print(
-            "Optimization finished. You can now analyze which weights went to 0 (pruned)."
-        )
-    else:
-        print("Warning: No valid solution found during optimization.")
 
+if __name__ == "__main__":
+    run_evolutionary_optimization()
 
 if __name__ == "__main__":
     run_evolutionary_optimization()
