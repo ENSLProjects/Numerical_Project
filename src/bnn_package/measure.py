@@ -8,8 +8,6 @@ from scipy.spatial.distance import pdist  # noqa: F401
 import networkx as nx
 from tabulate import tabulate
 import time
-from datetime import datetime
-from pathlib import Path
 import entropy.entropy as ee
 from tqdm import tqdm
 
@@ -199,52 +197,6 @@ def print_simulation_report(adj_matrix, fast_mode=False):
     t_end = time.time()
     print(f"\n[System] Topology analysis completed in {t_end - t_start:.3f}s")
     print("=" * 60 + "\n")
-
-
-def get_simulation_path(base_folder, sim_name, parameters=None):
-    """
-    Generates a valid path and ensures the folder exists.
-
-    Args:
-        base_folder (str): e.g., "results" or "/home/user/data"
-        sim_name (str): General prefix, e.g., "FHN_Run"
-        parameters (dict): Optional. Adds param values to filename for easy searching.
-
-    Returns:
-        Path: A full Path object ready for h5py
-    """
-    # 1. Define the Output Directory
-    # We use Path() so this works on Windows and Linux automatically
-    # We add a date subfolder to keep things organized
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    output_dir = Path(base_folder) / date_str
-
-    # 2. Create the directory if it doesn't exist
-    # parents=True allows creating "results/2023-10-27" in one go
-    # exist_ok=True prevents error if folder already exists
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    # 3. Construct the Filename
-    # Start with a Timestamp for uniqueness
-    time_str = datetime.now().strftime("%H-%M-%S")
-    filename = f"{sim_name}_{time_str}"
-
-    # Optional: Append key parameters to filename (e.g., "Sim_12-00-00_eps0.1.h5")
-    if parameters:
-        # Filter for crucial params to keep filename short
-        if "epsilon" in parameters:
-            filename += f"_eps{parameters['epsilon']:.2f}"
-        if "how to diffuse" in parameters:
-            filename += "_" + parameters["how to diffuse"]
-        if "time_length_simulation" in parameters:
-            filename += f"_finaltime{parameters['time_length_simulation']:.2f}"
-        if "number of nodes" in parameters:
-            filename += f"_nodes{parameters['number of nodes']:.2f}"
-
-    filename += ".h5"
-
-    # 4. Join folder and filename
-    return output_dir / filename
 
 
 def compute_te_over_lags(

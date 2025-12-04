@@ -4,20 +4,15 @@
 
 from bnn_package import (
     corrupted_simulation,
-    pull_out_full_data,
     prepare_data,
     compute_te_over_lags,
+    load_simulation_data,
 )
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import entropy.entropy as ee
 
 # ======================= CONFIGURATION
-
-MY_FOLDER = "data_simulation"
-filename = "2025-12-03/FhN_22-43-55_eps0.08_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
-file_path = os.path.join(MY_FOLDER, filename)
 
 # --- PATCH DE COMPATIBILITÉ (Indispensable pour Numpy récent) ---
 if not hasattr(np, "int"):
@@ -25,50 +20,58 @@ if not hasattr(np, "int"):
 if not hasattr(np, "float"):
     setattr(np, "float", float)
 
+MY_FOLDER = "data_simulation"
+filename = "2025-12-04/FhN_14-55-35_eps0.10_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
+file_path = os.path.join(MY_FOLDER, filename)
+
 # ======================= DIAGNOSIS and LOADING
 
 corrupted_simulation(file_path)
 
-Full_Data = pull_out_full_data(file_path)
+Full_Data = load_simulation_data(file_path, False)
 if Full_Data is None:
     raise ValueError(f"Failed to load data from {file_path}")
-Trajectory = Full_Data["time trajectory"]
-# Note: pull_out_full_data returns the dict under the key "parameters"
-All_Params = Full_Data["parameters"]
-Parameters_model = All_Params["parameters_model"]
+
+Trajectory = Full_Data["trajectory"]
+Parameters_simu = Full_Data["parameters"]
+
+print("\n Parameters of the analyzed simulation", Parameters_simu)
+
+Parameters_model = Parameters_simu["parameters_model"]
+final_time = Parameters_simu["time length simulation"]
 rk4_time = Parameters_model["time_step rk4"]
-final_time = All_Params["time length simulation"]
+
 real_time = rk4_time * np.arange(Trajectory.shape[0])
 
-fig, ax = plt.subplots()
-ax.plot(real_time, Trajectory[:, 4, 0], label=f"Node {4}")
-ax.plot(real_time, Trajectory[:, 5, 0], label=f"Node {5}")
-ax.plot(real_time, Trajectory[:, 6, 0], label=f"Node {6}")
-ax.plot(real_time, Trajectory[:, 10, 0], label=f"Node {10}")
-ax.plot(real_time, Trajectory[:, 100, 0], label=f"Node {100}")
-ax.plot(real_time, Trajectory[:, 500, 0], label=f"Node {500}")
-ax.plot(real_time, Trajectory[:, 930, 0], label=f"Node {930}")
-ax.set_xlabel("Time Step")
-ax.set_ylabel("Voltage $V_e$")
-ax.legend()
-ax.grid(True)
-plt.show()
+# fig, ax = plt.subplots()
+# ax.plot(real_time, Trajectory[:, 4, 0], label=f"Node {4}")
+# ax.plot(real_time, Trajectory[:, 5, 0], label=f"Node {5}")
+# ax.plot(real_time, Trajectory[:, 6, 0], label=f"Node {6}")
+# ax.plot(real_time, Trajectory[:, 10, 0], label=f"Node {10}")
+# ax.plot(real_time, Trajectory[:, 100, 0], label=f"Node {100}")
+# ax.plot(real_time, Trajectory[:, 500, 0], label=f"Node {500}")
+# ax.plot(real_time, Trajectory[:, 930, 0], label=f"Node {930}")
+# ax.set_xlabel("Time (s)")
+# ax.set_ylabel("Voltage $V_e$")
+# ax.legend()
+# ax.grid(True)
+# plt.show()
+
 
 # ======================= ENTROPY
 
 # ------------ parameters
-node_source = 5
-node_target = 500
-lag = 1
+node_source = 4
+node_target = 5
 kNN = 5
 n_embeded = 2
-N_eff = 4096  # number of points on each subset measurement
-N_real = 20  # number of subsets
+N_eff = 8192  # number of points on each subset measurement
+N_real = 5  # number of subsets, for 20 the std is already of order 1e-16
 # ------------- data
 
-ee.get_sampling(verbosity=1)
+# ee.get_sampling(verbosity=1)
 
-LAGS = np.arange(1, 10001, 100, dtype=int)
+LAGS = np.arange(1, 10001, 50, dtype=int)
 
 # --- RUN ---
 try:
@@ -96,17 +99,16 @@ try:
         LAGS,
         te_mean,
         yerr=te_std,
-        fmt="-o",
+        fmt="-x",
         color="crimson",
         ecolor="gray",
         capsize=3,
         label=f"TE({node_source} $\\to$ {node_target})",
     )
 
-    # Calculate Integral (Sum)
-    te_integral = np.sum(te_mean)
-
-    plt.title(f"Transfer Entropy Lag Profile\nIntegral = {te_integral:.4f}")
+    plt.title(
+        f"Transfer Entropy Lag Profile\nNumber of points used = {N_eff}, Number of calculation = {N_real}"
+    )
     plt.xlabel("Lag $\\tau$ (time steps)")
     plt.ylabel("Transfer Entropy (nats)")
     plt.grid(True, alpha=0.3)
@@ -115,3 +117,5 @@ try:
 
 except Exception as e:
     print(f"Error: {e}")
+
+# print("\nstd TE: ", te_std)

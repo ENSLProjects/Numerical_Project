@@ -6,6 +6,10 @@ import os
 import h5py
 from typing import cast
 import numpy as np
+import networkx as nx
+import json
+from datetime import datetime
+from pathlib import Path
 
 # ======================= Functions
 
@@ -48,12 +52,11 @@ def corrupted_simulation(file_path):
 
     if not os.path.exists(file_path):
         print(f"CRITICAL ERROR: File not found at {file_path}")
-        return True  # Return True (Corrupted/Error) so the script knows to stop
+        return True
 
     with h5py.File(file_path, "r") as f:
         print(f"--- File found: {filename} ---")
 
-        # 1. LOAD DATA DIRECTLY FROM ROOT
         try:
             trajectory = get_data(f, "trajectory")
         except KeyError:
@@ -77,78 +80,138 @@ def corrupted_simulation(file_path):
             print(
                 "\n[CONCLUSION] ❌ The simulation EXPLODED. Try to change the Runge-Kutta time step."
             )
-            return True  # True means it IS corrupted
+            return True
         elif max_val == 0 and min_val == 0:
             print("\n[CONCLUSION] ⚠️ The simulation is FLAT (All Zeros).")
             return True
         else:
             print("\n[CONCLUSION] ✅ Data looks valid.")
-            return False  # False means NOT corrupted (Healthy)
+            return False
 
 
-def pull_out_full_data(file_path):
+def json_numpy_serializer(obj):
+    """Automatically converts numpy types to standard python types.
+    Make Numpy JSON-serializable.
+    """
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    raise TypeError(f"Type {type(obj)} not serializable")
+
+
+def save_simulation_data(file_path, trajectory, parameters, graph_path):
+    """
+    Saves heavy data to HDF5, embeds parameters as JSON, and links the graph file.
+    """
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+
+    with h5py.File(file_path, "w") as f:
+        f.create_dataset(
+            "trajectory",
+            data=trajectory.astype(np.float32),
+            compression="gzip",
+            compression_opts=4,
+            shuffle=True,
+        )
+
+        param_str = json.dumps(parameters, default=json_numpy_serializer)
+        f.attrs["parameters"] = param_str
+        f.attrs["linked_graph_path"] = graph_path
+
+    print(f"[Saved] Data: {file_path}")
+    print(f"[Linked] Graph: {graph_path}")
+
+
+def load_simulation_data(file_path, graph: bool):
+    """Loads trajectory, parameters, and the linked graph if wanted.
+
+    Args:
+        file_path (str): relative path to the file
+        graph (bool): True if you want to load the graph as a networkx graph.
+
+    Raises:
+        FileNotFoundError: the path doen't exist
+
+    Returns:
+        _type_: return the full data of the simulation.
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"{file_path} not found.")
+    data = {}
     with h5py.File(file_path, "r") as f:
-        trajectory = get_data(f, "trajectory")
+        # 1. Trajectory
+        data["trajectory"] = get_data(f, "trajectory")
 
-        parameters = load_dict_from_hdf5(f)
+        # 2. Parameters (JSON String -> Dict)
+        param_str = f.attrs["parameters"]
+        # Fix for HDF5 bytes/string difference
+        if isinstance(param_str, bytes):
+            param_str = param_str.decode("utf-8")
+        elif isinstance(param_str, np.ndarray):
+            param_str = str(param_str.item())
+        elif not isinstance(param_str, str):
+            param_str = str(param_str)
+        data["parameters"] = json.loads(param_str)
 
-    return {"time trajectory": trajectory, "parameters": parameters}
-
-
-def save_dict_to_hdf5(h5_group, dic):
-    """
-    Recursively saves a dictionary to an HDF5 group.
-
-    Args:
-        h5_group: The HDF5 Group or File object to write into.
-        dic: The dictionary to save.
-    """
-    for key, item in dic.items():
-        # Case 1: Item is a nested dictionary -> Create a Group and Recurse
-        if isinstance(item, dict):
-            # Create the subgroup and capture the object
-            subgroup = h5_group.create_group(key)
-            # Pass THIS subgroup object to the recursive call
-            save_dict_to_hdf5(subgroup, item)
-
-        # Case 2: Item is an Array or List -> Create a Dataset
-        elif isinstance(item, (np.ndarray, list)):
-            h5_group.create_dataset(key, data=item)
-
-        # Case 3: Item is a simple value -> Save as Attribute
+        # 3. Get Graph Path
+        graph_path = f.attrs["linked_graph_path"]
+        if isinstance(graph_path, bytes):
+            graph_path = graph_path.decode("utf-8")
+        elif isinstance(graph_path, np.ndarray):
+            graph_path = str(graph_path.item())
+        elif not isinstance(graph_path, str):
+            graph_path = str(graph_path)
+    if graph:
+        # 4. Load Graph (External file)
+        if os.path.exists(graph_path):
+            data["graph"] = nx.read_graphml(graph_path)
         else:
-            # Save directly to the attributes of the current group object
-            try:
-                h5_group.attrs[key] = item
-            except TypeError:
-                # Fallback for types HDF5 doesn't like (e.g. None)
-                h5_group.attrs[key] = str(item)
+            # If graph is missing, we just return None (or raise Error if you prefer)
+            print(f"Warning: Graph file missing at {graph_path}")
+            data["graph"] = None
+    else:
+        print("\nGraph not loaded")
+
+    print("\n DATA SUCCESFULLT LOADED")
+
+    return data
 
 
-def load_dict_from_hdf5(h5_group):
+def get_simulation_path(base_folder, sim_name, parameters=None):
     """
-    Recursively reconstructs a dictionary from an HDF5 group.
+    Generates a valid path and ensures the folder exists.
 
     Args:
-        h5_group: The HDF5 Group or File object to read from.
+        base_folder (str): e.g., "results" or "/home/user/data"
+        sim_name (str): General prefix, e.g., "FHN_Run"
+        parameters (dict): Optional. Adds param values to filename for easy searching.
+
+    Returns:
+        Path: A full Path object ready for h5py
     """
-    ans = {}
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    output_dir = Path(base_folder) / date_str
 
-    # 1. Load Attributes (Metadata)
-    for key, val in h5_group.attrs.items():
-        # Handle standard string decoding
-        if isinstance(val, bytes):
-            val = val.decode("utf-8")
-        ans[key] = val
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2. Load Items (Datasets or Subgroups)
-    # .items() iterates over the direct children of the group
-    for key, item in h5_group.items():
-        if isinstance(item, h5py.Dataset):
-            # It's a dataset -> load value
-            ans[key] = item[()]
-        elif isinstance(item, h5py.Group):
-            # It's a group -> recurse using the group object
-            ans[key] = load_dict_from_hdf5(item)
+    time_str = datetime.now().strftime("%H-%M-%S")
+    filename = f"{sim_name}_{time_str}"
 
-    return ans
+    # Optional: Append key parameters to filename (e.g., "Sim_12-00-00_eps0.1.h5")
+    if parameters:
+        # Filter for crucial params to keep filename short
+        if "epsilon" in parameters:
+            filename += f"_eps{parameters['epsilon']:.2f}"
+        if "how to diffuse" in parameters:
+            filename += "_" + parameters["how to diffuse"]
+        if "time_length_simulation" in parameters:
+            filename += f"_finaltime{parameters['time_length_simulation']:.2f}"
+        if "number of nodes" in parameters:
+            filename += f"_nodes{parameters['number of nodes']:.2f}"
+
+    filename += ".h5"
+
+    return output_dir / filename
