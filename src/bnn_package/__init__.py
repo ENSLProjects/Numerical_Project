@@ -23,9 +23,10 @@ from .evolution import (
 from .data_processing import (
     get_data,
     corrupted_simulation,
-    pull_out_full_data,
     prepare_data,
-    save_dict_to_hdf5,
+    load_simulation_data,
+    save_simulation_data,
+    get_simulation_path,
 )
 
 from .measure import (
@@ -33,7 +34,6 @@ from .measure import (
     MSD_inverse,
     find_settling_time,
     print_simulation_report,
-    get_simulation_path,
     compute_te_over_lags,
 )
 
@@ -59,7 +59,7 @@ __all__ = [
     "fhn_derivatives",
     "get_data",
     "corrupted_simulation",
-    "pull_out_full_data",
     "compute_te_over_lags",
-    "save_dict_to_hdf5",
+    "load_simulation_data",
+    "save_simulation_data",
 ]

@@ -4,9 +4,9 @@
 
 from bnn_package import (
     corrupted_simulation,
-    pull_out_full_data,
     prepare_data,
     compute_te_over_lags,
+    load_simulation_data,
 )
 import os
 import numpy as np
@@ -15,29 +15,33 @@ import entropy.entropy as ee
 
 # ======================= CONFIGURATION
 
-MY_FOLDER = "data_simulation"
-filename = "2025-12-03/FhN_22-43-55_eps0.08_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
-file_path = os.path.join(MY_FOLDER, filename)
-
 # --- PATCH DE COMPATIBILITÉ (Indispensable pour Numpy récent) ---
 if not hasattr(np, "int"):
     setattr(np, "int", int)
 if not hasattr(np, "float"):
     setattr(np, "float", float)
 
+MY_FOLDER = "data_simulation"
+filename = "2025-12-03/FhN_22-43-55_eps0.08_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
+file_path = os.path.join(MY_FOLDER, filename)
+
 # ======================= DIAGNOSIS and LOADING
 
 corrupted_simulation(file_path)
 
-Full_Data = pull_out_full_data(file_path)
+Full_Data = load_simulation_data(file_path, False)
 if Full_Data is None:
     raise ValueError(f"Failed to load data from {file_path}")
-Trajectory = Full_Data["time trajectory"]
-# Note: pull_out_full_data returns the dict under the key "parameters"
-All_Params = Full_Data["parameters"]
-Parameters_model = All_Params["parameters_model"]
+
+Trajectory = Full_Data["trajectory"]
+Parameters_simu = Full_Data["parameters"]
+
+print("\n Parameters of the anylized simulation", Parameters_simu)
+
+Parameters_model = Parameters_simu["parameters_model"]
+final_time = Parameters_simu["time length simulation"]
 rk4_time = Parameters_model["time_step rk4"]
-final_time = All_Params["time length simulation"]
+
 real_time = rk4_time * np.arange(Trajectory.shape[0])
 
 fig, ax = plt.subplots()

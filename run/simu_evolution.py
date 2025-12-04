@@ -12,13 +12,12 @@ from bnn_package import (
     step_henon,
     print_simulation_report,
     get_simulation_path,
-    save_dict_to_hdf5,
+    save_simulation_data,
 )
 import networkx as nx
 import numpy as np
 from numpy.random import default_rng
 import time
-import h5py
 import os
 
 # ======================= PARAMETERS
@@ -64,6 +63,7 @@ if model == "Henon":
     param = np.array(parameterHenon, dtype=np.float64)
     model_step_func = step_henon
     parameters = {"coupling": Eps, "a": a, "b": b}
+
 elif model == "FhN":
     param = np.array(parameterFhN, dtype=np.float64)
     model_step_func = step_fhn_rk4
@@ -132,7 +132,7 @@ print(
 print(60 * "=")
 print_simulation_report(
     Adjacency, fast_mode=True
-)  # comment this line to avoid topology analysis
+)  # comment this line to avoid all topology analysis
 
 print(20 * "-" + ">" + " READY TO LAUNCH ")
 
@@ -151,23 +151,11 @@ print("=" * 60)
 
 Datacuted = FullData[transitoire:, :, :]
 
-graph_filename = f"graph_{model}_{N_nodes}_{Eps}.graphml"
+graph_filename = f"graph_{model}_{N_nodes}_{Eps}_Poisson{f}.graphml"
 full_graph_path = os.path.join(GRAPH_FOLDER, graph_filename)
 
 nx.write_graphml(Graph_passive, full_graph_path)
 
-with h5py.File(save_path, "w") as f:
-    # Save the heavy simulation data normally
-    f.create_dataset(
-        "trajectory",
-        data=Datacuted.astype(np.float32),
-        compression="gzip",
-        shuffle=True,
-    )
-
-    # Save ALL metadata (params_dict) recursively in one line
-    # We save it under a group called "config" to keep it tidy,
-    # or use "/" to save at root.
-    save_dict_to_hdf5(f, params_dict)
-
 print(f"\nGraph saved to: {full_graph_path}")
+
+save_simulation_data(save_path, Datacuted, params_dict, full_graph_path)
