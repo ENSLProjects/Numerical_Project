@@ -38,7 +38,7 @@ f = 3  # mean of the Poisson law (o average: number of passive nodes for one act
 
 A = 3.0  # 0
 alpha = 0.2  # 1
-Eps = 2.1  # 2
+Eps = 0.1  # 2
 K = 0.25  # 3
 Vrp = 1.5  # 4
 dt = 0.01  # 5
@@ -54,7 +54,7 @@ parameterHenon = [a, b]  # a and b in this order
 #!#!#!#!#!# Remaining parameters
 
 model = "FhN"
-N_time = 10000
+N_time = 300000
 type_diff = "Laplacian"
 
 #!#!#!#!#!# Dictionnaries
@@ -157,5 +157,7 @@ full_graph_path = os.path.join(GRAPH_FOLDER, graph_filename)
 nx.write_graphml(Graph_passive, full_graph_path)
 
 print(f"\nGraph saved to: {full_graph_path}")
+print(60 * "=" + "\n")
+
 
 save_simulation_data(save_path, Datacuted, params_dict, full_graph_path)

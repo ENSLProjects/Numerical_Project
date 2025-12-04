@@ -146,7 +146,7 @@ def load_simulation_data(file_path, graph: bool):
         data["trajectory"] = get_data(f, "trajectory")
 
         # 2. Parameters (JSON String -> Dict)
-        param_str = f.attrs["parameters_json"]
+        param_str = f.attrs["parameters"]
         # Fix for HDF5 bytes/string difference
         if isinstance(param_str, bytes):
             param_str = param_str.decode("utf-8")

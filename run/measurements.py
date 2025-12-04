@@ -22,7 +22,7 @@ if not hasattr(np, "float"):
     setattr(np, "float", float)
 
 MY_FOLDER = "data_simulation"
-filename = "2025-12-03/FhN_22-43-55_eps0.08_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
+filename = "2025-12-04/FhN_14-35-31_eps0.10_Laplacian_nodes1000.00.h5"  # Adjust based on your 'model' and 'run_name' logic
 file_path = os.path.join(MY_FOLDER, filename)
 
 # ======================= DIAGNOSIS and LOADING
@@ -36,7 +36,7 @@ if Full_Data is None:
 Trajectory = Full_Data["trajectory"]
 Parameters_simu = Full_Data["parameters"]
 
-print("\n Parameters of the anylized simulation", Parameters_simu)
+print("\n Parameters of the analyzed simulation", Parameters_simu)
 
 Parameters_model = Parameters_simu["parameters_model"]
 final_time = Parameters_simu["time length simulation"]
@@ -52,7 +52,7 @@ ax.plot(real_time, Trajectory[:, 10, 0], label=f"Node {10}")
 ax.plot(real_time, Trajectory[:, 100, 0], label=f"Node {100}")
 ax.plot(real_time, Trajectory[:, 500, 0], label=f"Node {500}")
 ax.plot(real_time, Trajectory[:, 930, 0], label=f"Node {930}")
-ax.set_xlabel("Time Step")
+ax.set_xlabel("Time (s)")
 ax.set_ylabel("Voltage $V_e$")
 ax.legend()
 ax.grid(True)
