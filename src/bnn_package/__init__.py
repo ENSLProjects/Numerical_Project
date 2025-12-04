@@ -63,5 +63,3 @@ __all__ = [
     "load_simulation_data",
     "save_simulation_data",
 ]
-
-print("I AM EDITABLE!")

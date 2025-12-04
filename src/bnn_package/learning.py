@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from sklearn.linear_model import Ridge
 from sklearn.metrics import accuracy_score
 import cma
+import h5py
 
 from bnn_package import evolution
 from bnn_package import buildgraph
@@ -218,7 +219,7 @@ def run_evolutionary_optimization():
 
     # --- 2. THE CANYON TOPOLOGY ---
     N_NODES = 25
-    rng = np.random.default_rng(42)
+    rng = np.random.default_rng()
 
     print(">>> Building The Canyon (Gap between In and Out)...")
 
@@ -243,7 +244,7 @@ def run_evolutionary_optimization():
     # Create Connectivity based on these positions
     # sigma=2.5 ensures Input (x=0) CANNOT reach Output (x=10) directly.
     # It must hop at least 3-4 times.
-    Base_Adj = buildgraph.connexion_normal_deterministic(pos, rng, std=3.0)
+    Base_Adj = buildgraph.connexion_normal_deterministic(pos, rng, std=2.3)
 
     # Define Zones
     in_nodes = np.array([0, 1, 2])
@@ -301,7 +302,7 @@ def run_evolutionary_optimization():
         print(f"Gen {es.result.iterations}: Best Acc = {best_acc:.2%}")
 
         # Stop early if solved (to save time)
-        if best_acc > 0.99:
+        if best_acc > 0.999:
             print("Solved!")
             break
 
@@ -309,9 +310,29 @@ def run_evolutionary_optimization():
     plot_synaptic_plasticity(weight_hist)
     plot_weight_distribution(weight_hist)
 
+    # --- 5. SAVE THE BRAIN ---
 
-if __name__ == "__main__":
-    run_evolutionary_optimization()
+    # Reconstruct the Final Adjacency Matrix
+    Final_Adj = np.zeros_like(Base_Adj, dtype=np.float64)
+    best_weights = (
+        np.abs(es.result.xbest) if es.result.xbest is not None else np.zeros(n_edges)
+    )
+
+    # Apply weights
+    rows, cols = edge_idx
+    Final_Adj[rows, cols] = best_weights
+    Final_Adj = Final_Adj + Final_Adj.T
+
+    # Save to HDF5
+    filename = "data_simulation/Evolved_Canyon_Brain.h5"
+    with h5py.File(filename, "w") as f:
+        f.create_dataset("adjacency", data=Final_Adj)
+        f.create_dataset("positions", data=pos)  # Save positions to plot them later
+        f.attrs["accuracy"] = best_acc
+        f.attrs["generations"] = es.result.iterations
+
+    print(f"\n>>> [SAVED] Brain stored in {filename}")
+
 
 if __name__ == "__main__":
     run_evolutionary_optimization()

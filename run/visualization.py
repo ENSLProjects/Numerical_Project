@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from bnn_package import get_data
 
 
-def visualize_evolved_brain(file_path="Evolved_Canyon_Brain.h5"):
+def visualize_evolved_brain(file_path="data_simulation/Evolved_Canyon_Brain.h5"):
     """
     Loads the evolved graph and plots the active pathways.
     """
