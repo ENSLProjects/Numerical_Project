@@ -2,6 +2,15 @@
 
 # ======================= Libraries
 
+from bnn_package import (
+    pos_nodes_uniform,
+    connexion_normal_deterministic,
+    get_coupling_operator,
+    evolve_system,
+    step_fhn_rk4,
+    add_passive_nodes,
+)
+
 import numpy as np
 import numba
 from scipy.spatial.distance import pdist  # noqa: F401
@@ -233,3 +242,71 @@ def compute_te_over_lags(
         stds[i] = np.std(current_lag_values)
 
     return means, stds
+
+
+def run_simulation_and_measure(params):
+    """
+    Input: Tuple (epsilon, cr, node_count, time_steps)
+    Output: Tuple (epsilon, cr, order_parameter)
+    """
+    # Unpack parameters (needed for multiprocessing mapping)
+    epsilon, cr, n_nodes, t_max = params
+
+    # --- 1. SETUP ---
+    # We use a unique seed per process to ensure randomness is different in every thread
+    rng = np.random.default_rng()
+
+    # Fixed Physics Parameters
+    std = 0.25
+    f = 3
+    A, alpha, K, Vrp, dt = 3.0, 0.2, 0.25, 1.5, 0.01
+
+    # Pack parameters for the solver
+    solver_params = np.array([A, alpha, epsilon, K, Vrp, dt], dtype=np.float64)
+
+    # Initialize State
+    State_0 = np.zeros((n_nodes, 3))
+    State_0[:, 0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)  # v_e
+    State_0[:, 1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)  # g
+    State_0[:, 2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)  # v_p
+
+    # Build Graph
+    pos = pos_nodes_uniform(n_nodes, 10.0, 10.0, rng)
+    Adjacency = connexion_normal_deterministic(pos, rng, std)
+    DiffusionOp = get_coupling_operator(Adjacency, "Laplacian")
+
+    # Passive Nodes
+    import networkx as nx
+
+    G = nx.from_numpy_array(Adjacency)
+    # NetworkX attributes need to be set for add_passive_nodes to work
+    nx.set_node_attributes(G, {n: "active" for n in G.nodes()}, name="type")
+    _, N_p = add_passive_nodes(G, f, rng)
+
+    # --- 2. EVOLUTION ---
+    # Run the physics
+    trajectory = evolve_system(
+        State_0, t_max, solver_params, step_fhn_rk4, N_p, DiffusionOp, cr, "Laplacian"
+    )
+
+    # --- 3. MEASURE ---
+    # Discard transient (first 20%)
+    start_measure = int(t_max * 0.2)
+
+    # Compute Order Parameter (Mean Synchronization Error)
+    # We sample every 10 steps to speed up calculation
+    X = trajectory[start_measure::10, :, 0]
+    Y = trajectory[start_measure::10, :, 1]
+
+    errors = []
+    # Synchronized_error requires a time index relative to the passed array
+    # Since we sliced the array, we iterate through its new length
+    for t in range(X.shape[0]):
+        # Note: Numba function usually expects the full N_nodes
+        err = Synchronized_error(X, Y, n_nodes, t)
+        errors.append(err)
+
+    order_parameter = np.mean(errors)
+
+    # Return the key parameters and the result
+    return (epsilon, cr, order_parameter)
