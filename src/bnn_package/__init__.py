@@ -27,6 +27,7 @@ from .data_processing import (
     load_simulation_data,
     save_simulation_data,
     get_simulation_path,
+    parse_arguments,
 )
 
 from .measure import (
@@ -62,4 +63,5 @@ __all__ = [
     "compute_te_over_lags",
     "load_simulation_data",
     "save_simulation_data",
+    "parse_arguments",
 ]

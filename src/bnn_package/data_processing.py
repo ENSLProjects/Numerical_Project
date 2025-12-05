@@ -2,6 +2,7 @@
 
 # ======================= Libraries
 
+import argparse
 import os
 import h5py
 from typing import cast
@@ -215,3 +216,68 @@ def get_simulation_path(base_folder, sim_name, parameters=None):
     filename += ".h5"
 
     return output_dir / filename
+
+
+def parse_arguments():
+    parser = argparse.ArgumentParser(
+        description="Run FhN Simulation with parsed arguments"
+    )
+
+    # --- PHYSICAL PARAMETERS ---
+    parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=0.08,
+        help="Coupling strength active nodes (Eps)",
+    )
+    parser.add_argument(
+        "--Cr", type=float, default=1.5, help="Coupling active-passive (C_r)"
+    )
+    parser.add_argument("--nodes", type=int, default=1000, help="Number of nodes")
+    parser.add_argument(
+        "--time", type=int, default=300000, help="Simulation time steps"
+    )
+    parser.add_argument(
+        "--std", type=float, default=0.25, help="Gaussian kernel std graph building"
+    )
+    parser.add_argument(
+        "--poisson",
+        type=float,
+        default=3.0,
+        help="Mean of the Poisson law for the passive nodes",
+    )
+    parser.add_argument(
+        "--square",
+        type=float,
+        default=10.0,
+        help="Size of the square side nodes are placed into",
+    )
+    parser.add_argument(
+        "--operator",
+        type=str,
+        default="Laplacian",
+        help="Combinatory or Normalized Laplacian?",
+    )
+
+    # --- MODEL PARAMETERS
+    parser.add_argument("--alpha", type=float, default=0.2)
+    parser.add_argument("--K", type=float, default=0.25)
+    parser.add_argument("--Vrp", type=float, default=1.5)
+    parser.add_argument("--A", type=float, default=3.0)
+    parser.add_argument(
+        "--dt", type=float, default=0.01, help="Time step in the Runge Kutta integrator"
+    )
+    parser.add_argument(
+        "--transitoire",
+        type=int,
+        default=5000,
+        help="Time (in virtual time steps not seconde) of the transitory regime",
+    )
+
+    # --- SYSTEM ---
+    parser.add_argument("--seed", type=int, default=1234567890, help="RNG Seed")
+    parser.add_argument(
+        "--output_dir", type=str, default="data_simulation", help="Base output folder"
+    )
+
+    return parser.parse_args()
