@@ -1,0 +1,27 @@
+# ==========================================
+# EXPERIMENT CONFIGURATION
+# ==========================================
+
+# --- Simulation Settings ---
+nodes: 1000
+time_steps: 50000
+transient: 10000        # Steps to discard before measuring
+output_file: "results_phase_diagram.csv"
+cores_ratio: 0.8        # Use 80% of CPU cores
+
+# --- Physics Parameters ---
+# TIP: If you put a LIST [a, b], the script will loop over it.
+#      If you put a single value, it stays constant.
+
+# The Phase Space to Scan:
+epsilon: [0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4]
+cr: [0.0, 0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+
+# Fixed Parameters:
+std: 0.25               # Gaussian connectivity radius
+f: 3                    # Poisson passive node density
+A: 3.0
+alpha: 0.2
+K: 0.25
+Vrp: 1.5
+dt: 0.01
