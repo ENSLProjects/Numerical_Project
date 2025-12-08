@@ -5,55 +5,66 @@
 
 import itertools
 import multiprocessing
-import pandas as pd
 import os
 import sys
 import time
 import shutil
+import uuid
 
-from run.workers import run_order_parameter, time_series
-from bnn_package import load_config
+from bnn_package import save_result, load_config
+from workers import run_order_parameter, time_series
 
 
 # ======================= Functions
 
 
-def save_result(res, i, output_file, mode):
-    """Save clean results in csv.
-
-    Args:
-        res (): _description_
-        i (int): Loop index.
-        output_file (str): Relative file path to save the csv.
-        mode (str): What is computes?
+def archive_graph(config, result_dir):
     """
-    if mode == "time_series":
-        return
+    Manages Graph Provenance.
+    Strictly expects the config to point to an existing graph file
+    (which is guaranteed if you use generate_config.py).
 
-    if res is None or not res:
-        return
+    It copies that graph into the result directory so the experiment
+    is self-contained.
+    """
+    source_path = config.get("existing_graph_path")
 
-    df_temp = pd.DataFrame([res])
-    # Write header only on the first run (i==0) AND if file doesn't exist
-    header = (i == 0) and (not os.path.exists(output_file))
-    df_temp.to_csv(output_file, mode="a", header=header, index=False)
+    # Enforce the Factory Workflow
+    if not source_path or not os.path.exists(source_path):
+        print("\n>>> CRITICAL ERROR: Graph file missing!")
+        print(f"    The config points to: {source_path}")
+        print("    Please use 'generate_config.py' to create your experiments.")
+        print("    It guarantees a valid graph is created and linked.")
+        sys.exit(1)
+
+    print("\n>>> GRAPH PROVENANCE")
+    print(f"    Source:   {source_path}")
+
+    # Copy the graph file to the result folder (Archiving)
+    filename = os.path.basename(source_path)
+    dest_path = os.path.join(result_dir, filename)
+    shutil.copy(source_path, dest_path)
+
+    print(f"    Archived: {dest_path}")
+    return dest_path
 
 
 def generate_tasks(config):
-    """Read the .yaml configuration file and create a py dictionnary with all the loop from the cartesian product of all parameters in order to scan the phase space.
-
-    Args:
-        config (dic): Input dictionnaty from the config.yaml
-
-    Returns:
-        dic: All combinaisons of parameters to run over.
-    """
+    """Create the grid of parameters to run over."""
     fixed_params = {}
     sweep_keys = []
     sweep_values = []
 
+    # Define keys to NEVER sweep
+    NON_SWEEP = [
+        "square_for_graph",
+        "metrics",
+        "diffusive_operator",
+        "existing_graph_path",
+    ]
+
     for key, val in config.items():
-        if isinstance(val, list):
+        if isinstance(val, list) and key not in NON_SWEEP:
             sweep_keys.append(key)
             sweep_values.append(val)
         else:
@@ -74,61 +85,56 @@ def main():
     config_path = "run/config/config_phase_scan.yaml"
     if len(sys.argv) > 1:
         config_path = sys.argv[1]
-
     if not os.path.exists(config_path):
-        print(f"Error: Config file '{config_path}' not found.")
+        print("Error: Config path not found.")
         return
-
     config = load_config(config_path)
 
-    # 1. Generate a unique name for this run
+    # --- RUN PROVENANCE ---
+    run_uuid = str(uuid.uuid4())[:8]
     experiment_name = os.path.splitext(os.path.basename(config_path))[0]
     timestamp = time.strftime("%Y%m%d-%H%M%S")
 
-    # 2. Create the Result Directory
-    result_dir = os.path.join("results", f"{timestamp}_{experiment_name}")
+    # Folder: Date_Name_RunID
+    result_dir = os.path.join("Data_output", f"{timestamp}_{experiment_name}")
     os.makedirs(result_dir, exist_ok=True)
 
-    # 3. Snapshot the Config File (Save a copy)
-    shutil.copy(config_path, os.path.join(result_dir, "config_snapshot.yaml"))
-
-    # 4. Redirect output to this new folder
-    output_filename = config.get("output_file", "results.csv")
-    output_file = os.path.join(result_dir, output_filename)
+    # Snapshot Config
+    shutil.copy(config_path, os.path.join(result_dir, f"config_{run_uuid}.yaml"))
+    output_file = os.path.join(result_dir, config.get("output_file", "results.csv"))
 
     print(f"\n{'=' * 60}")
-    print(f">>> RUN STARTED: {experiment_name}")
-    print(f"    Results Dir: {result_dir}")
-    print("    Config Snapshot Saved.")
+    print(f">>> RUN ID:   {run_uuid}")
+    print(f"    Folder:   {result_dir}")
 
-    # --- SETUP EXECUTION ---
+    # --- GRAPH MANAGEMENT (Simplified) ---
+    # We replaced 'get_or_create' with 'archive_graph'
+    graph_path = archive_graph(config, result_dir)
+
+    # --- GENERATE TASKS ---
     mode = config.get("mode", "sweep")
+    target_function = time_series if mode == "time_series" else run_order_parameter
 
-    if mode == "time_series":
-        target_function = time_series
-        print(">>> MODE: Time Series")
-        # IMPORTANT: Tell the worker to save HDF5 files inside our new result_dir
-        # We inject this path into every task parameters
-    else:
-        target_function = run_order_parameter
-        print(">>> MODE: Phase Scan")
-
-    # Generate Tasks
     tasks, sweep_vars = generate_tasks(config)
 
-    # Inject result_dir into tasks so workers know where to save (if needed)
+    # INJECT PROVENANCE INTO EVERY TASK
     for task in tasks:
         task["output_folder"] = result_dir
+        task["run_id"] = run_uuid
+        task["graph_file_path"] = graph_path
 
-    # Setup Parallelism
-    use_parallel = config.get("parallel", True)
-    n_cores = max(1, int(multiprocessing.cpu_count() * config.get("cores_ratio", 0.8)))
+    # --- PARALLEL EXECUTION ---
+    use_parallel = config.get("parallel", False)
+    ratio_cpu = config.get("cores_ratio", 0.8)
+    n_cores = max(
+        1, int(multiprocessing.cpu_count() * config.get("cores_ratio", ratio_cpu))
+    )
 
     if not use_parallel:
-        print(f">>> SEQUENTIAL MODE ({n_cores} threads/process)")
+        print(f"\n>>> SEQUENTIAL ({n_cores} threads)")
         os.environ["OMP_NUM_THREADS"] = str(n_cores)
     else:
-        print(f">>> PARALLEL MODE ({n_cores} processes)")
+        print(f"\n>>> PARALLEL ({n_cores} procs)")
         os.environ["OMP_NUM_THREADS"] = "1"
 
     print(f"    Sweeping: {sweep_vars}")
@@ -137,7 +143,6 @@ def main():
 
     start_time = time.time()
 
-    # --- RUN LOOP ---
     if use_parallel:
         with multiprocessing.Pool(n_cores) as pool:
             try:
@@ -148,7 +153,6 @@ def main():
                 )
             except ImportError:
                 iterator = pool.imap_unordered(target_function, tasks)
-
             for i, res in enumerate(iterator):
                 save_result(res, i, output_file, mode)
     else:
@@ -158,8 +162,10 @@ def main():
             res = target_function(task)
             save_result(res, i, output_file, mode)
 
-    print(f"\n>>> DONE in {time.time() - start_time:.2f} s")
-    print(f"    All data saved in: {result_dir}")
+    end_time = time.time()
+
+    print(f"\n>>> SIMULATION SUCCESSFULLY COMPLETED IN {end_time - start_time:.3f}s")
+    print(f"\n>>> DONE: Saved to {result_dir}")
 
 
 if __name__ == "__main__":

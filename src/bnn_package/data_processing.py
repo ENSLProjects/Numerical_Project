@@ -11,6 +11,7 @@ import networkx as nx
 import json
 from datetime import datetime
 from pathlib import Path
+import pandas as pd
 
 # ======================= Functions
 
@@ -124,6 +125,14 @@ def save_simulation_data(file_path, trajectory, parameters, graph_path):
 
     print(f"[Saved] Data: {file_path}")
     print(f"[Linked] Graph: {graph_path}")
+
+
+def save_result(res, i, output_file, mode):
+    if mode == "time_series" or not res:
+        return
+    df_temp = pd.DataFrame([res])
+    header = (i == 0) and (not os.path.exists(output_file))
+    df_temp.to_csv(output_file, mode="a", header=header, index=False)
 
 
 def load_simulation_data(file_path, graph: bool):

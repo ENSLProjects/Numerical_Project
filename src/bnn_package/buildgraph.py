@@ -153,8 +153,9 @@ def add_passive_nodes(G, f, rng):
     for node in list(new_G.nodes()):
         new_G.nodes[node]["type"] = "active"
 
-    # DEBUG: Check input values
-    print("--- INFO ---")
+    print("\n" + 60 * "=")
+    print("\nTOTAL GRAPH TOPOLOGY SUMMARY")
+    print("-----------------------------")
     print(f"Active Nodes: {len(G.nodes())}")
     print(f"Poisson Mean (f): {f}")
 

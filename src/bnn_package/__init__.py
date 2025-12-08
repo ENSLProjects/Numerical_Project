@@ -28,6 +28,7 @@ from .data_processing import (
     save_simulation_data,
     get_simulation_path,
     load_config,
+    save_result,
 )
 
 from .measure import (
@@ -64,4 +65,5 @@ __all__ = [
     "load_simulation_data",
     "save_simulation_data",
     "load_config",
+    "save_result",
 ]

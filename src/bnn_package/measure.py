@@ -190,7 +190,9 @@ def print_simulation_report(adj_matrix, fast_mode=False):
 
     # 6. Print using 'fancy_grid' for that scientific look
     print("\n" + "=" * 60)
-    print(f">>> SIMULATION INITIALIZATION LOG [{time.strftime('%H:%M:%S')}]")
+    print(
+        f">>> GRAPH ACTIVE NODES ONLY TOPOLOGY ANALYSIS LOG [{time.strftime('%H:%M:%S')}]"
+    )
     print("=" * 60)
     print(tabulate(table_data, headers="firstrow", tablefmt="fancy_grid"))
 
