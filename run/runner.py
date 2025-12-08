@@ -2,33 +2,33 @@
 
 # ======================= Libraries
 
+
 import itertools
 import multiprocessing
 import pandas as pd
 import os
 import sys
 import time
+import shutil
 
-from bnn_package import load_config
 from run.workers import run_order_parameter, time_series
+from bnn_package import load_config
+
 
 # ======================= Functions
 
 
 def save_result(res, i, output_file, mode):
-    """Saves a single result row to CSV safely
+    """Save clean results in csv.
 
     Args:
-        res (_type_): _description_
-        i (int): loop index
-        output_file (str): relative path of the result file
-        mode (str): what is computed
-
-    Returns:
-        csv: a file with saved data (order parameter)
+        res (): _description_
+        i (int): Loop index.
+        output_file (str): Relative file path to save the csv.
+        mode (str): What is computes?
     """
     if mode == "time_series":
-        return  # Time series worker saves its own files
+        return
 
     if res is None or not res:
         return
@@ -40,7 +40,14 @@ def save_result(res, i, output_file, mode):
 
 
 def generate_tasks(config):
-    """Detects lists in config and generates the Cartesian product grid."""
+    """Read the .yaml configuration file and create a py dictionnary with all the loop from the cartesian product of all parameters in order to scan the phase space.
+
+    Args:
+        config (dic): Input dictionnaty from the config.yaml
+
+    Returns:
+        dic: All combinaisons of parameters to run over.
+    """
     fixed_params = {}
     sweep_keys = []
     sweep_values = []
@@ -53,19 +60,17 @@ def generate_tasks(config):
             fixed_params[key] = val
 
     combinations = list(itertools.product(*sweep_values))
-
     tasks = []
     for combo in combinations:
         task = fixed_params.copy()
         for i, key in enumerate(sweep_keys):
             task[key] = combo[i]
         tasks.append(task)
-
     return tasks, sweep_keys
 
 
 def main():
-    # 1. Load Configuration
+    # --- LOAD CONFIG ---
     config_path = "run/config/config_phase_scan.yaml"
     if len(sys.argv) > 1:
         config_path = sys.argv[1]
@@ -75,22 +80,47 @@ def main():
         return
 
     config = load_config(config_path)
-    output_file = config.get("output_file", "results.csv")
 
-    # 2. Determine Mode
+    # 1. Generate a unique name for this run
+    experiment_name = os.path.splitext(os.path.basename(config_path))[0]
+    timestamp = time.strftime("%Y%m%d-%H%M%S")
+
+    # 2. Create the Result Directory
+    result_dir = os.path.join("results", f"{timestamp}_{experiment_name}")
+    os.makedirs(result_dir, exist_ok=True)
+
+    # 3. Snapshot the Config File (Save a copy)
+    shutil.copy(config_path, os.path.join(result_dir, "config_snapshot.yaml"))
+
+    # 4. Redirect output to this new folder
+    output_filename = config.get("output_file", "results.csv")
+    output_file = os.path.join(result_dir, output_filename)
+
+    print(f"\n{'=' * 60}")
+    print(f">>> RUN STARTED: {experiment_name}")
+    print(f"    Results Dir: {result_dir}")
+    print("    Config Snapshot Saved.")
+
+    # --- SETUP EXECUTION ---
     mode = config.get("mode", "sweep")
 
     if mode == "time_series":
         target_function = time_series
-        print(">>> MODE: Time Series (Heavy Data Saving)")
+        print(">>> MODE: Time Series")
+        # IMPORTANT: Tell the worker to save HDF5 files inside our new result_dir
+        # We inject this path into every task parameters
     else:
         target_function = run_order_parameter
         print(">>> MODE: Phase Scan")
 
-    # 3. Generate Grid
+    # Generate Tasks
     tasks, sweep_vars = generate_tasks(config)
 
-    # 4. Setup Parallelism
+    # Inject result_dir into tasks so workers know where to save (if needed)
+    for task in tasks:
+        task["output_folder"] = result_dir
+
+    # Setup Parallelism
     use_parallel = config.get("parallel", True)
     n_cores = max(1, int(multiprocessing.cpu_count() * config.get("cores_ratio", 0.8)))
 
@@ -103,10 +133,11 @@ def main():
 
     print(f"    Sweeping: {sweep_vars}")
     print(f"    Jobs:     {len(tasks)}")
+    print(f"{'=' * 60}\n")
 
     start_time = time.time()
 
-    # 5. Run Loop
+    # --- RUN LOOP ---
     if use_parallel:
         with multiprocessing.Pool(n_cores) as pool:
             try:
@@ -121,7 +152,6 @@ def main():
             for i, res in enumerate(iterator):
                 save_result(res, i, output_file, mode)
     else:
-        # Sequential
         from tqdm import tqdm
 
         for i, task in enumerate(tqdm(tasks)):
@@ -129,6 +159,7 @@ def main():
             save_result(res, i, output_file, mode)
 
     print(f"\n>>> DONE in {time.time() - start_time:.2f} s")
+    print(f"    All data saved in: {result_dir}")
 
 
 if __name__ == "__main__":

@@ -26,6 +26,8 @@ def run_order_parameter(params):
     """Standardized Worker: Accepts ONE dictionary 'params'.
     Extracts seed and metrics from inside that dictionary.
 
+    WARNING: this only works for FinzHugh Nagumo model.
+
     Args:
         params (dic): dic from the .yaml config file
 
@@ -33,7 +35,6 @@ def run_order_parameter(params):
         csv: csv of the output, value of the order parameter for the set of parameters params
     """
     # 1. Unpack Setup
-    # Extract seed from params (default if missing)
     seed = params.get("seed", 123456789)
     rng = default_rng(seed)
 
@@ -136,8 +137,9 @@ def time_series(params):
     dt = params["dt"]
     C_r = params["Cr"]
 
-    transitoire = params.get("transient", 0)
     N_time = params["Total time"]
+    default_transient = int(0.1 * N_time)
+    transitoire = params.get("Transitory", default_transient)
     Diffusion_mode = params["Diffusive Operator"]
 
     # 2. Init State & Graph
@@ -164,7 +166,8 @@ def time_series(params):
     print(f"    Done in {time.time() - t_start:.2f}s")
 
     # 4. Save
-    MY_FOLDER = "data_simulation"
+    MY_FOLDER = params.get("output_folder", "data_simulation")
+
     GRAPH_FOLDER = os.path.join(MY_FOLDER, "graph")
     os.makedirs(GRAPH_FOLDER, exist_ok=True)
 
