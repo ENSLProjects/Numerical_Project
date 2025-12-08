@@ -170,12 +170,12 @@ def evolve_system(
     n_nodes, dim = State_0.shape
     Trajectory = np.zeros((N_steps, n_nodes, dim), dtype=State_0.dtype)
     Trajectory[0] = State_0
-    progress_stride = max(1, N_steps // 10)
+    # progress_stride = max(1, N_steps // 10)
     for t in range(0, N_steps - 1):
-        if t % progress_stride == 0:
-            print("Simulation Progress:", (t * 100) // N_steps, "%")
+        # if t % progress_stride == 0:
+        # print("Simulation Progress:", (t * 100) // N_steps, "%")
         Trajectory[t + 1] = model_step_func(
             Trajectory[t], params, N_p, Coupling_op, C_r, type_diff
         )
-    print("Simulation Progress: 100%")
+    # print("Simulation Progress: 100%")
     return Trajectory

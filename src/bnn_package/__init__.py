@@ -1,6 +1,6 @@
 #!/usr/bin/env/python3
 
-# ================ Library
+
 from .buildgraph import (
     pos_nodes_uniform,
     norm_multi,

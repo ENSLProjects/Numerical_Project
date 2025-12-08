@@ -123,9 +123,6 @@ def save_simulation_data(file_path, trajectory, parameters, graph_path):
         f.attrs["parameters"] = param_str
         f.attrs["linked_graph_path"] = graph_path
 
-    print(f"[Saved] Data: {file_path}")
-    print(f"[Linked] Graph: {graph_path}")
-
 
 def save_result(res, i, output_file, mode):
     if mode == "time_series" or not res:

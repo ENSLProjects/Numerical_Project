@@ -2,10 +2,12 @@
 
 # ======================= Libraries
 
+
 import numpy as np
 import matplotlib.pyplot as plt
 
 from bnn_package import load_simulation_data, prepare_data, compute_te_over_lags
+
 
 # ======================= Functions
 

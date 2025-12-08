@@ -90,13 +90,32 @@ def main():
         return
     config = load_config(config_path)
 
+    # --- NAME CLEANER (Fixing the Double Date issue) ---
+    # 1. Get the full filename (e.g., "20251208_183347_debugging.yaml")
+    raw_name = os.path.splitext(os.path.basename(config_path))[0]
+
+    # 2. Try to split by underscores to find the real name
+    # We expect format: YYYYMMDD_HHMMSS_Name
+    parts = raw_name.split("_", 2)
+
+    if (
+        len(parts) >= 3
+        and parts[0].isdigit()
+        and parts[1].isdigit()
+        and len(parts[0]) == 8
+    ):
+        # It matches the generator pattern! Use only the name part.
+        clean_experiment_name = parts[2]
+    else:
+        # It's a custom manual name, keep it as is.
+        clean_experiment_name = raw_name
+
     # --- RUN PROVENANCE ---
     run_uuid = str(uuid.uuid4())[:8]
-    experiment_name = os.path.splitext(os.path.basename(config_path))[0]
     timestamp = time.strftime("%Y%m%d-%H%M%S")
 
     # Folder: Date_Name_RunID
-    result_dir = os.path.join("Data_output", f"{timestamp}_{experiment_name}")
+    result_dir = os.path.join("Data_output", f"{timestamp}_{clean_experiment_name}")
     os.makedirs(result_dir, exist_ok=True)
 
     # Snapshot Config
@@ -107,8 +126,7 @@ def main():
     print(f">>> RUN ID:   {run_uuid}")
     print(f"    Folder:   {result_dir}")
 
-    # --- GRAPH MANAGEMENT (Simplified) ---
-    # We replaced 'get_or_create' with 'archive_graph'
+    # --- GRAPH MANAGEMENT ---
     graph_path = archive_graph(config, result_dir)
 
     # --- GENERATE TASKS ---
@@ -149,7 +167,10 @@ def main():
                 from tqdm import tqdm
 
                 iterator = tqdm(
-                    pool.imap_unordered(target_function, tasks), total=len(tasks)
+                    pool.imap_unordered(target_function, tasks),
+                    total=len(tasks),
+                    ncols=80,  # Limits width to 80 chars (prevents flickering)
+                    unit="sim",
                 )
             except ImportError:
                 iterator = pool.imap_unordered(target_function, tasks)
@@ -158,7 +179,7 @@ def main():
     else:
         from tqdm import tqdm
 
-        for i, task in enumerate(tqdm(tasks)):
+        for i, task in enumerate(tqdm(tasks, ncols=80, unit="sim")):
             res = target_function(task)
             save_result(res, i, output_file, mode)
 

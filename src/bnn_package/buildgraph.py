@@ -1,6 +1,8 @@
 #!/usr/bin/env/python3
 
 # ======================= Libraries
+
+
 import numpy as np
 from numpy.random import Generator
 from scipy.spatial.distance import pdist, squareform
@@ -8,6 +10,8 @@ import numba
 
 
 # ======================= Functions
+
+
 def pos_nodes_uniform(N: int, xmax: float, ymax: float, rng: Generator):
     """
     return N points randomly distributed with uniform law in the rectangle of vertex [(0, 0), (0, xmax), (xmax, ymax), (ymax, 0)]

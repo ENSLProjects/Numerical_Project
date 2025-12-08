@@ -5,7 +5,8 @@
 
 import numpy as np
 import os
-import time
+
+# import time
 from numpy.random import default_rng
 
 from bnn_package import (
@@ -21,8 +22,13 @@ from bnn_package.measure import AVAILABLE_METRICS
 
 
 def load_graph_topology(path):
-    """
-    Loads the standard graph format saved by runner.py
+    """Loads the standard graph format saved by runner.py
+
+    Args:
+        path (str): relative path where to dowloand the topoly.
+
+    Returns:
+        tupple: the adjacency, nodes positions and number of passive nodes by active nodes data
     """
     data = np.load(path)
     # Extract Graph ID if available
@@ -31,16 +37,21 @@ def load_graph_topology(path):
 
 
 def common_worker_setup(params):
+    """Shared setup logic for both workers.
+
+    Args:
+        params (dic): setup of parameters from the .yaml file.
+
+    Returns:
+        tupple: returns the array of the FhN parameters, the diffusion operator (Combinatory or Normalized Laplacian), the vector of passive nodes and the uuid of the graph.
     """
-    Shared setup logic for both workers.
-    """
-    # 1. Load Graph (CRITICAL STEP)
+    # 1. Load Graph
     graph_path = params["graph_file_path"]
-    Adjacency, pos, N_p, graph_uuid = load_graph_topology(graph_path)
+    adjacency, pos, N_p, graph_uuid = load_graph_topology(graph_path)
 
     # 2. Physics Operators
-    Diffusion = params["diffusive_operator"]
-    DiffusionOp = get_coupling_operator(Adjacency, Diffusion).astype(np.float64)
+    diffusion = params["diffusive_operator"]
+    diffusionOp = get_coupling_operator(adjacency, diffusion).astype(np.float64)
 
     # 3. Physics Vector
     p_vec = np.array(
@@ -55,45 +66,49 @@ def common_worker_setup(params):
         dtype=np.float64,
     )
 
-    return p_vec, DiffusionOp, N_p, graph_uuid
+    return p_vec, diffusionOp, N_p, graph_uuid, diffusion
 
 
 def time_series(params):
-    print(f">>> Running Time Series Eps={params.get('epsilon')}")
+    """_summary_
+
+    Args:
+        params (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
 
     # 1. Setup from Graph File
-    p_vec, DiffusionOp, N_p, graph_uuid = common_worker_setup(params)
-    N_nodes = params["number_of_nodes"]
+    p_vec, diffusionOp, N_p, graph_uuid, diffusion = common_worker_setup(params)
+    n_nodes = params["number_of_nodes"]
+    full_time = params.get("total_time")
 
-    # 2. Random State Init (Physics State is distinct from Graph Topology)
+    # 2. Random State Init
     rng = default_rng(params.get("seed", None))
-    State_0 = np.zeros((N_nodes, 3))
-    State_0[:, 0] = 0.1 + 0.1 * rng.standard_normal(N_nodes)
-    State_0[:, 1] = 0.3 + 0.1 * rng.standard_normal(N_nodes)
-    State_0[:, 2] = 1.0 + 0.1 * rng.standard_normal(N_nodes)
+    State_0 = np.zeros((n_nodes, 3))
+    State_0[:, 0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[:, 1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[:, 2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
 
     # 3. Run
-    t_start = time.time()
     FullData = evolve_system(
         State_0,
-        params["total_time"],
+        full_time,
         p_vec,
         step_fhn_rk4,
         N_p,
-        DiffusionOp,
+        diffusionOp,
         params["cr"],
-        "Laplacian",
+        diffusion,
     )
-
-    print(f"\n EVOLUTION DONE IN {time.time() - t_start:.3f}s")
 
     # 4. Save
     MY_FOLDER = params.get("output_folder", "Data_output")
 
-    # NAMING CONVENTION: Includes RunID (Experiment) + GraphID (Topology)
     # This allows you to find this specific file later easily
     run_id = params.get("run_id", "manual")
-    filename = f"ts_N{N_nodes}_eps{params['epsilon']:.3f}_G-{graph_uuid}.h5"
+    filename = f"ts_N{n_nodes}_eps{params['epsilon']:.3f}_G-{graph_uuid}.h5"
     save_path = os.path.join(MY_FOLDER, filename)
 
     # Embed IDs into Metadata
@@ -101,22 +116,31 @@ def time_series(params):
     params_dict["graph_uuid"] = graph_uuid
     params_dict["run_uuid"] = run_id
 
-    transitoire = params.get("transitory_time", 0)
+    transit_inter = full_time * 0.1
+    transitoire = params.get("transitory_time", transit_inter)
     save_simulation_data(save_path, FullData[transitoire:], params_dict, "")
 
     return {}
 
 
 def run_order_parameter(params):
+    """_summary_
+
+    Args:
+        params (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     # 1. Setup
-    p_vec, DiffusionOp, N_p, graph_uuid = common_worker_setup(params)
+    p_vec, DiffusionOp, N_p, graph_uuid, diffusion = common_worker_setup(params)
     N_nodes = params["number_of_nodes"]
 
     rng = default_rng(params.get("seed", None))
     State_0 = np.zeros((N_nodes, 3))
     State_0[:, 0] = 0.1 + 0.1 * rng.standard_normal(N_nodes)
 
-    # 2. Run
+    # 2. Run, better to run again the simulation than loading really heavy ones
     traj = evolve_system(
         State_0,
         params["total_time"],
@@ -125,10 +149,10 @@ def run_order_parameter(params):
         N_p,
         DiffusionOp,
         params["cr"],
-        "Laplacian",
+        diffusion,
     )
 
-    # 3. Measure
+    # 3. Measure HAVE TO BE ADAPT TO WORK IN A MORE GENERAL CONTEXT
     start = params["transitory_time"]
     X = traj[start::10, :, 0]
     Y = traj[start::10, :, 1]
