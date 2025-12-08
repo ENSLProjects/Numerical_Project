@@ -36,7 +36,6 @@ from .measure import (
     find_settling_time,
     print_simulation_report,
     compute_te_over_lags,
-    run_simulation_and_measure,
 )
 
 __all__ = [
@@ -65,5 +64,4 @@ __all__ = [
     "load_simulation_data",
     "save_simulation_data",
     "load_config",
-    "run_simulation_and_measure",
 ]

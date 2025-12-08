@@ -233,3 +233,27 @@ def compute_te_over_lags(
         stds[i] = np.std(current_lag_values)
 
     return means, stds
+
+
+def mean_activity(X, Y, N, t):
+    """Simple example metric: Mean global voltage"""
+    return np.mean(X)
+
+
+def kuramoto_order(X, Y, N, t):
+    """Example: Kuramoto Order Parameter (Phase coherence)"""
+    # Assuming X is phase or can be converted to phase
+    phases = np.arctan2(Y, X)
+    z = np.mean(np.exp(1j * phases))
+    return np.abs(z)
+
+
+# --- THE REGISTRY ---
+
+AVAILABLE_METRICS = {
+    "sync_error": Synchronized_error,
+    "mean_activity": mean_activity,
+    "kuramoto": kuramoto_order,
+    "mean standard deviation": MSD_vec_xy,
+    # Add
+}

@@ -25,3 +25,7 @@ alpha: 0.2
 K: 0.25
 Vrp: 1.5
 dt: 0.01
+
+# --- Metrics to Compute ---
+# Add any keys from AVAILABLE_METRICS here
+metrics: ["sync_error", "mean_activity", "mean standard deviation"]
