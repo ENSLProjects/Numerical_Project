@@ -154,16 +154,15 @@ def run_order_parameter(params):
 
     # 3. Measure HAVE TO BE ADAPT TO WORK IN A MORE GENERAL CONTEXT
     start = params["transitory_time"]
-    X = traj[start::10, :, 0]
-    Y = traj[start::10, :, 1]
 
     results = {"epsilon": params["epsilon"], "cr": params["cr"]}
     results["graph_uuid"] = graph_uuid  # Save which graph was used
 
+    Data = traj[start:, :, :]
+
     metrics = params.get("metrics", ["sync_error"])
     for m in metrics:
         if m in AVAILABLE_METRICS:
-            val = [AVAILABLE_METRICS[m](X, Y, N_nodes, t) for t in range(X.shape[0])]
-            results[m] = np.mean(val)
+            results[m] = m(Data)
 
     return results

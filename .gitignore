@@ -170,7 +170,7 @@ dmypy.json
 
 # pytype static type analyzer
 .pytype/
-
+pyrightconfig.json
 Data_output/*
 run/configs/*
 

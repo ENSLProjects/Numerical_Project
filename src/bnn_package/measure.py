@@ -63,22 +63,6 @@ def find_settling_time(signal, final_n_samples, tolerance_percent=1):
     return settling_index, settling_index, (lower_bound, upper_bound)
 
 
-@numba.jit(nopython=True)
-def MSD_xy(G, X, Y):
-    """
-    Return the MSD for a given epsilon
-    """
-    n, N = X.shape
-    assert n == len(G), "wrong dimension"
-    MSD_values = np.zeros(N)
-    mean_X = np.mean(X, axis=0)
-    mean_Y = np.mean(Y, axis=0)
-    for t in range(N):
-        MSD_t = np.mean((X[:, t] - mean_X[t]) ** 2 + (Y[:, t] - mean_Y[t]) ** 2)
-        MSD_values[t] = MSD_t
-    return MSD_values
-
-
 def MSD_vec_xy(G, X, Y):
     """
     Return the MSD for a given epsilon
@@ -94,7 +78,7 @@ def MSD_vec_xy(G, X, Y):
     return MSD_values
 
 
-def MSD(G, X, average=True, axe=1):
+def MSD(G, X, order: str, average=True, axe=1):
     """
     Return the MSD in the order:
     -- axe=1: esperance_t(variance_node(t))
@@ -102,23 +86,19 @@ def MSD(G, X, average=True, axe=1):
     """
     (n, N) = np.shape(X)
     assert N == len(G), "wrong dimension"
-    msd_values = np.std(X, axis=axe)
-    if average:
-        return np.mean(msd_values)
+    if order == "right":
+        msd_values = np.std(X, axis=axe)
+        if average:
+            return np.mean(msd_values)
+        else:
+            return msd_values
+    elif order == "left":
+        msd_values = np.mean(X, axis=axe)
+        return np.std(msd_values)
     else:
-        return msd_values
-
-
-def MSD_inverse(G, X, axe=0):
-    """
-    Return the MSD in the order:
-    -- axe=1: esperance_t(variance_node(t))
-    -- axe=0: esperance_node(variance_t(node))
-    """
-    n, N = X.shape
-    assert N == len(G), "wrong dimension"
-    MSD_values = np.mean(X, axis=axe)
-    return np.std(MSD_values)
+        raise ValueError(
+            f"the way to compute MSD is either 'right' for std+mean or 'left' for mean+std but {order} was given"
+        )
 
 
 @numba.jit(nopython=True)
@@ -239,11 +219,6 @@ def compute_te_over_lags(
     return means, stds
 
 
-def mean_activity(X, Y, N, t):
-    """Simple example metric: Mean global voltage"""
-    return np.mean(X)
-
-
 def kuramoto_order(X, Y, N, t):
     """Example: Kuramoto Order Parameter (Phase coherence)"""
     # Assuming X is phase or can be converted to phase
@@ -256,7 +231,6 @@ def kuramoto_order(X, Y, N, t):
 
 AVAILABLE_METRICS = {
     "sync_error": Synchronized_error,
-    "mean_activity": mean_activity,
     "kuramoto": kuramoto_order,
     "mean standard deviation": MSD_vec_xy,
     # Add
