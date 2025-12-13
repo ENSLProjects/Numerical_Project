@@ -1,180 +1,235 @@
-#!/usr/bin/env/python3
+#!/usr/bin/env python3
 
 # ======================= Libraries
 
+
+from typing import List, Tuple, Any
 import numpy as np
 import numba
+from numba import float64, int32
+from numba.experimental import jitclass
 
-# ======================= Functions
+
+# ======================= Helper Functions =======================
 
 
-def get_coupling_operator(Adjacence, type_diff: str):
+def get_coupling_operator(adjacency: np.ndarray, type_diff: str) -> np.ndarray:
     """
     Pre-computes the normalized adjacency matrix.
-    Run this once in pure python rather jit compilation.
+    Run this ONCE in pure Python before the simulation.
     """
     if type_diff == "Diffusive":
-        weights = np.sum(Adjacence, axis=1)
+        weights = np.sum(adjacency, axis=1)
         if np.any(weights == 0):
             raise ValueError("Nodes with degree 0 detected.")
-        Coupling_op = (
-            Adjacence / weights[:, np.newaxis]
-        )  # We use broadcasting to divide each row by its weight
+        coupling_op = adjacency / weights[:, np.newaxis]
     elif type_diff == "Laplacian":
-        degrees = np.sum(Adjacence, axis=1)
-        Deg = np.diag(degrees)
-        # The Laplacian
-        Coupling_op = Deg - Adjacence
+        degrees = np.sum(adjacency, axis=1)
+        deg_matrix = np.diag(degrees)
+        coupling_op = deg_matrix - adjacency
     else:
-        raise ValueError("No method gave for coupling")
-    # === CRITICAL PERFORMANCE POINT ===
-    # We force the matrix to be laid out contiguously in memory.
-    # BLAS (the math engine behind @) runs much faster on contiguous arrays.
-    return np.ascontiguousarray(Coupling_op)
+        raise ValueError(f"Unknown coupling method: {type_diff}")
+
+    # Critical for performance: Ensure contiguous memory layout
+    return np.ascontiguousarray(coupling_op)
 
 
-@numba.jit(
-    nopython=True
-)  # option mode "fastmath=True" can be swith on if data are clean enough
-def coupling_func(State_voltage_active, eps, Coupling_op, Model, type_diff: str):
-    """
-    Applies diffusive coupling to the State.
+# ======================= 1. MODEL DEFINITIONS =======================
 
-    State: (N_nodes, Dimension)
-    Model : type of coupling : 'Henon' or 'FhN'
-    Norm_Adj: Pre-computed (N_nodes, N_nodes) matrix
-    """
-    result = np.zeros(State_voltage_active.shape)
+# --- FitzHugh-Nagumo Model ---
 
-    if Model == "Henon":
-        interaction = (
-            Coupling_op @ State_voltage_active
-        )  # For sparse or huge network (more than 1000 nodes with only few neighbors by node use an explicit for loop with numba)
-        result = (1.0 - eps) * State_voltage_active + eps * interaction
-
-    if Model == "FhN":
-        if type_diff == "Laplacian":
-            result = eps * (Coupling_op @ State_voltage_active)
-        elif type_diff == "Diffusive":
-            neighbor_avg = Coupling_op @ State_voltage_active
-            result = (1.0 - eps) * State_voltage_active + eps * neighbor_avg
-        else:
-            raise ValueError("No method gave for the coupling")
-
-    return result
+fhn_spec: List[Tuple[str, Any]] = [
+    ("coupling_op", float64[:, ::1]),  # The matrix (N, N)
+    ("a", float64),  # Parameter Alpha (Scalar)
+    ("eps", float64),  # Epsilon
+    ("k", float64),  # K (Passive)
+    ("v_rp", float64),  # Resting Potential
+    ("coupling_str", float64),  # Sigma (Coupling strength)
+    ("dt", float64),  # Time step
+    ("type_diff", int32),  # 0=Diffusive, 1=Laplacian
+    ("c_r", float64),  # Resistive Coupling (Scalar)
+    ("n_p", float64[:]),  # Passive Node Count (Vector)
+]
 
 
-@numba.jit(nopython=True)
-def fhn_derivatives(State, params, N_p, Coupling_op, C_r, type_diff):
-    """
-    Computes the derivative dS/dt for a system of oscillators.
-    State shape: (N_nodes, 3) -> col 0 is v_e (voltage of active node), col 1 is g (recovery), col 2 is v_p (voltage of passive node)
-    Params: bibliothèque (Note: dt is not used here, but passed in params)
-    A : adjacency matrix (N*N)
-    N_p : 1D array which represents a diagonal matrix
-    """
-    v_e = np.ascontiguousarray(State[:, 0])
-    g = State[:, 1]
-    v_p = State[:, 2]
+@jitclass(fhn_spec)  # type: ignore
+class FitzHughNagumoModel:
+    def __init__(
+        self,
+        coupling_op,
+        alpha,
+        eps,
+        k,
+        vrp,
+        coupling_str,
+        dt,
+        type_diff_code,
+        cr,
+        np_vec,
+    ):
+        self.coupling_op = coupling_op
+        self.a = alpha
+        self.eps = eps
+        self.k = k
+        self.v_rp = vrp
+        self.coupling_str = coupling_str
+        self.dt = dt
+        self.type_diff = type_diff_code
+        self.c_r = cr
+        self.n_p = np_vec
 
-    A = params[0]
-    alpha = params[1]
-    Eps = params[2]
-    K = params[3]
-    V_RP = params[4]
+    def derivatives(self, state, t, current_input):
+        """
+        Computes dState/dt.
+        State shape: (3, N) -> [v_active, w, v_passive]
+        """
+        v = state[0]
+        w = state[1]
+        v_p = state[2]
 
-    dState = np.empty_like(State)
-    # Termes de couplage
-    coupling_term = coupling_func(v_e, Eps, Coupling_op, "FhN", type_diff)
+        interaction = self.coupling_op @ v
 
-    # dv_e/dt = A*v_e*(v_e-alpha)*(1-v_e) - g + N_p*C_r*(v_p-v_e) - D*coupling_term[:,0]
-    dState[:, 0] = (
-        A * v_e * (v_e - alpha) * (1 - v_e)
-        - g
-        + ((C_r * (v_p - v_e)) * N_p)
-        - coupling_term
-    )
+        if self.type_diff == 1:  # Laplacian
+            coupling_term = self.coupling_str * interaction
+        else:  # Diffusive
+            coupling_term = (
+                1.0 - self.coupling_str
+            ) * v + self.coupling_str * interaction
 
-    # dg/dt = Eps(v_e - g)
-    dState[:, 1] = Eps * (v_e - g)
+        passive_interaction = self.c_r * (v_p - v)
 
-    # dv_p/dt = K(V_RP - v_p) - C_r(v_p - v_e)
-    dState[:, 2] = K * (V_RP - v_p) - C_r * (v_p - v_e)
-    return dState
-
-
-@numba.jit(nopython=True)
-def step_fhn_rk4(State, params, N_p, Coupling_op, C_r, type_diff):
-    """
-    Performs one RK4 step.
-    Matches signature: (State, params) -> New_State
-    """
-    dt = params[5]  # We assume dt is stored in the params array
-    # RK4 Integration Logic
-
-    # k1 = f(y)
-    k1 = fhn_derivatives(State, params, N_p, Coupling_op, C_r, type_diff)
-    # k2 = f(y + 0.5*dt*k1)
-    k2 = fhn_derivatives(
-        State + 0.5 * dt * k1, params, N_p, Coupling_op, C_r, type_diff
-    )
-    # k3 = f(y + 0.5*dt*k2)
-    k3 = fhn_derivatives(
-        State + 0.5 * dt * k2, params, N_p, Coupling_op, C_r, type_diff
-    )
-    # k4 = f(y + dt*k3)
-    k4 = fhn_derivatives(State + dt * k3, params, N_p, Coupling_op, C_r, type_diff)
-    # y_new = y + (dt/6) * (k1 + 2k2 + 2k3 + k4)
-    State_next = State + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
-    return State_next
-
-
-@numba.jit(nopython=True)
-def step_henon(State, params):
-    """
-    Performs one Henon map step.
-    Matches signature: (State, params) -> New_State
-    """
-    x = State[:, 0]
-    y = State[:, 1]
-    # Unpack parameters
-    a = params[0]
-    b = params[1]
-    # Pre-allocate derivative array
-    State_next = np.empty_like(State)
-    # x(n+1) = 1-a*x(n)^2 + y(n)
-    State_next[:, 0] = 1 - a * x * x + y
-    # y(n+1) = b*x(n)
-    State_next[:, 1] = b * x
-    return State_next
-
-
-@numba.jit(nopython=True)
-def evolve_system(
-    State_0, N_steps, params, model_step_func, N_p, Coupling_op, C_r, type_diff
-):
-    """
-    Main generic solver.
-
-    State_0 = Initial conditions
-    N_steps = length of the simulation (total time)
-    params = matrix of parameters for a given system
-    model_step_function = dynamical system's function
-    coupling_func = function defining the coupling
-    coupling_op = operator needed for the coupling_func
-    eps = value of the coupling
-
-    return the tensor of evolution state with the shape (N_steps, n_nodes, dim)
-    """
-    n_nodes, dim = State_0.shape
-    Trajectory = np.zeros((N_steps, n_nodes, dim), dtype=State_0.dtype)
-    Trajectory[0] = State_0
-    progress_stride = max(1, N_steps // 10)
-    for t in range(0, N_steps - 1):
-        if t % progress_stride == 0:
-            print("Simulation Progress:", (t * 100) // N_steps, "%")
-        Trajectory[t + 1] = model_step_func(
-            Trajectory[t], params, N_p, Coupling_op, C_r, type_diff
+        # dv/dt
+        dv = (
+            (v * (v - self.a) * (1.0 - v))  # Local Dynamics
+            - w  # Recovery
+            - coupling_term  # Network Diffusion
+            + current_input  # External Input
+            + (passive_interaction * self.n_p)  # Feedback from passive nodes
         )
-    print("Simulation Progress: 100%")
-    return Trajectory
+
+        # dw/dt
+        dw = self.eps * (v - w)
+
+        # dv_p/dt
+        dv_p = self.k * (self.v_rp - v_p) - passive_interaction
+
+        d_state = np.empty_like(state)
+        d_state[0] = dv
+        d_state[1] = dw
+        d_state[2] = dv_p
+
+        return d_state
+
+
+# --- Henon Map Model ---
+
+henon_spec: List[Tuple[str, Any]] = [
+    ("coupling_op", float64[:, ::1]),
+    ("a", float64),
+    ("b", float64),
+    ("coupling_str", float64),
+    ("dt", float64),  # Dummy for compatibility
+    ("type_diff", int32),
+]
+
+
+@jitclass(henon_spec)  # type: ignore
+class HenonMapModel:
+    def __init__(self, coupling_op, a, b, coupling_str, type_diff_code):
+        self.coupling_op = coupling_op
+        self.a = a
+        self.b = b
+        self.coupling_str = coupling_str
+        self.dt = 1.0
+        self.type_diff = type_diff_code
+
+    def compute_next_step(self, state, current_input):
+        """
+        Computes x(t+1), y(t+1).
+        State shape: (2, N)
+        """
+        x = state[0]
+        y = state[1]
+
+        interaction = self.coupling_op @ x
+
+        if self.type_diff == 1:
+            x_coupled = x + self.coupling_str * interaction
+        else:
+            x_coupled = (1.0 - self.coupling_str) * x + self.coupling_str * interaction
+
+        # Add Input
+        x_coupled += current_input
+
+        # Map Dynamics
+        x_next = 1.0 - self.a * (x_coupled**2) + y
+        y_next = self.b * x_coupled
+
+        next_state = np.empty_like(state)
+        next_state[0] = x_next
+        next_state[1] = y_next
+
+        return next_state
+
+
+# ======================= 2. SOLVER ENGINES =======================
+
+
+@numba.jit(nopython=True, nogil=True)
+def rk4_step(model, state, t, current_input):
+    """Runge-Kutta 4 Integrator for ODEs."""
+    dt = model.dt
+    k1 = model.derivatives(state, t, current_input)
+    k2 = model.derivatives(state + 0.5 * dt * k1, t + 0.5 * dt, current_input)
+    k3 = model.derivatives(state + 0.5 * dt * k2, t + 0.5 * dt, current_input)
+    k4 = model.derivatives(state + dt * k3, t + dt, current_input)
+
+    return state + (dt / 6.0) * (k1 + 2 * k2 + 2 * k3 + k4)
+
+
+@numba.jit(nopython=True, nogil=True)
+def euler_step(model, state, t, current_input):
+    """Euler Integrator (Faster, less accurate)."""
+    dt = model.dt
+    d_state = model.derivatives(state, t, current_input)
+    return state + dt * d_state
+
+
+@numba.jit(nopython=True, nogil=True)
+def map_step(model, state, t, current_input):
+    """Wrapper for Discrete Maps (Henon)."""
+    return model.compute_next_step(state, current_input)
+
+
+# ======================= 3. SIMULATION MANAGER =======================
+
+
+@numba.jit(nopython=True, nogil=True)
+def evolve_system(model, state_0, final_time, input_signal, stepper_func):
+    """
+    Generic Evolution Function.
+
+    Args:
+        model: Physics Object (FHN, Henon...)
+        state_0: Initial state (Dim, N_nodes)
+        final_time: Total steps (int)
+        input_signal: (Time, Nodes) or None
+        stepper_func: Function to use (rk4_step, map_step...)
+    """
+    dim = state_0.shape[0]
+    n_nodes = state_0.shape[1]
+
+    trajectory = np.zeros((final_time, dim, n_nodes), dtype=np.float64)
+    trajectory[0] = state_0
+
+    current_state = state_0.copy()
+    has_input = input_signal is not None
+
+    for t in range(final_time - 1):
+        u_in = input_signal[t] if has_input else 0.0
+
+        current_state = stepper_func(model, current_state, t * model.dt, u_in)
+
+        trajectory[t + 1] = current_state
+
+    return trajectory

@@ -1,6 +1,5 @@
-#!/usr/bin/env/python3
+#!/usr/bin/env python3
 
-# ================ Library
 from .buildgraph import (
     pos_nodes_uniform,
     norm_multi,
@@ -14,10 +13,11 @@ from .buildgraph import (
 from .evolution import (
     evolve_system,
     get_coupling_operator,
-    coupling_func,
-    step_fhn_rk4,
-    step_henon,
-    fhn_derivatives,
+    rk4_step,  # REPLACES step_fhn_rk4
+    euler_step,  # NEW
+    map_step,  # REPLACES step_henon
+    FitzHughNagumoModel,  # NEW: The Physics Engine
+    HenonMapModel,  # NEW: The Map Engine
 )
 
 from .data_processing import (
@@ -27,39 +27,48 @@ from .data_processing import (
     load_simulation_data,
     save_simulation_data,
     get_simulation_path,
+    load_config,
+    save_result,
 )
 
 from .measure import (
     MSD,
-    MSD_inverse,
     find_settling_time,
     print_simulation_report,
     compute_te_over_lags,
+    AVAILABLE_METRICS,  # Good to expose this registry
 )
 
 __all__ = [
+    # Graph Building
     "pos_nodes_uniform",
     "norm_multi",
     "local_connect_gaussian",
     "local_connect_lorentz",
     "connexion_normal_random_NUMBA",
     "connexion_normal_deterministic",
-    "find_settling_time",
-    "prepare_data",
-    "MSD",
-    "MSD_inverse",
-    "evolve_system",
-    "coupling_func",
-    "step_fhn_rk4",
-    "step_henon",
-    "get_coupling_operator",
-    "print_simulation_report",
-    "get_simulation_path",
     "add_passive_nodes",
-    "fhn_derivatives",
+    # Evolution / Physics
+    "evolve_system",
+    "get_coupling_operator",
+    "rk4_step",
+    "euler_step",
+    "map_step",
+    "FitzHughNagumoModel",
+    "HenonMapModel",
+    # Data Processing
     "get_data",
     "corrupted_simulation",
-    "compute_te_over_lags",
+    "prepare_data",
     "load_simulation_data",
     "save_simulation_data",
+    "get_simulation_path",
+    "load_config",
+    "save_result",
+    # Metrics
+    "MSD",
+    "find_settling_time",
+    "print_simulation_report",
+    "compute_te_over_lags",
+    "AVAILABLE_METRICS",
 ]

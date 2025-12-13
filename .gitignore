@@ -170,8 +170,9 @@ dmypy.json
 
 # pytype static type analyzer
 .pytype/
-
-data_simulation/*
+pyrightconfig.json
+Data_output/*
+run/configs/*
 
 # Cython debug symbols
 cython_debug/

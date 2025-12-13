@@ -2,6 +2,7 @@
 
 # ======================= Libraries
 
+import yaml
 import os
 import h5py
 from typing import cast
@@ -10,6 +11,7 @@ import networkx as nx
 import json
 from datetime import datetime
 from pathlib import Path
+import pandas as pd
 
 # ======================= Functions
 
@@ -121,8 +123,13 @@ def save_simulation_data(file_path, trajectory, parameters, graph_path):
         f.attrs["parameters"] = param_str
         f.attrs["linked_graph_path"] = graph_path
 
-    print(f"[Saved] Data: {file_path}")
-    print(f"[Linked] Graph: {graph_path}")
+
+def save_result(res, i, output_file, mode):
+    if mode == "time_series" or not res:
+        return
+    df_temp = pd.DataFrame([res])
+    header = (i == 0) and (not os.path.exists(output_file))
+    df_temp.to_csv(output_file, mode="a", header=header, index=False)
 
 
 def load_simulation_data(file_path, graph: bool):
@@ -215,3 +222,16 @@ def get_simulation_path(base_folder, sim_name, parameters=None):
     filename += ".h5"
 
     return output_dir / filename
+
+
+def load_config(path):
+    """Load the configuration file .yaml
+
+    Args:
+        path (str): relative path of the config file
+
+    Returns:
+        dic: dictionnary with the parameters as keys and their values as values
+    """
+    with open(path, "r") as f:
+        return yaml.safe_load(f)

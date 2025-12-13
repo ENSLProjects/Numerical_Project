@@ -1,6 +1,8 @@
 #!/usr/bin/env/python3
 
 # ======================= Libraries
+
+
 import numpy as np
 from numpy.random import Generator
 from scipy.spatial.distance import pdist, squareform
@@ -8,6 +10,8 @@ import numba
 
 
 # ======================= Functions
+
+
 def pos_nodes_uniform(N: int, xmax: float, ymax: float, rng: Generator):
     """
     return N points randomly distributed with uniform law in the rectangle of vertex [(0, 0), (0, xmax), (xmax, ymax), (ymax, 0)]
@@ -149,17 +153,16 @@ def add_passive_nodes(G, f, rng):
     new_G = G.copy()
 
     # 1. Label existing nodes as 'active'
-    # We use list(G.nodes()) to safely iterate
     for node in list(new_G.nodes()):
         new_G.nodes[node]["type"] = "active"
 
-    # DEBUG: Check input values
-    print("--- INFO ---")
+    print("\n" + 60 * "=")
+    print("\nTOTAL GRAPH TOPOLOGY SUMMARY")
+    print("-----------------------------")
     print(f"Active Nodes: {len(G.nodes())}")
     print(f"Poisson Mean (f): {f}")
 
     # 2. Generate counts
-    # Ensure nodes are sorted so the index i matches the same node every time
     nodes_list = sorted(list(G.nodes()))
     N_p = rng.poisson(f, size=len(nodes_list))
 
@@ -189,3 +192,11 @@ def add_passive_nodes(G, f, rng):
             next_node_id += 1
 
     return new_G, N_p
+
+
+############## NEXT STEPS
+# ---- connect component check make the generated adjacency matrix connected
+# ---- add heterogeneity
+# ---- add edge weightening: the connectivity is not 0 or 1 but a weight
+# ---- generalize for D dimensional space instead of hardocing for D=2 here
+# ---- add generality for connexion functions (give the kernel distance as input for more generality)
