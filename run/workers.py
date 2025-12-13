@@ -1,168 +1,156 @@
-#!/usr/bin/env/python3
+#!/usr/bin/env python3
 
 # ======================= Libraries
 
 
 import numpy as np
 import os
-
-# import time
 from numpy.random import default_rng
 
-from bnn_package import (
+from bnn_package.evolution import (
     get_coupling_operator,
     evolve_system,
-    step_fhn_rk4,
-    save_simulation_data,
+    rk4_step,
+    FitzHughNagumoModel,
 )
+from bnn_package.data_processing import save_simulation_data
 from bnn_package.measure import AVAILABLE_METRICS
 
 
-# ======================= Functions
+# ======================= Helper Functions =======================
 
 
 def load_graph_topology(path):
-    """Loads the standard graph format saved by runner.py
-
-    Args:
-        path (str): relative path where to dowloand the topoly.
-
-    Returns:
-        tupple: the adjacency, nodes positions and number of passive nodes by active nodes data
-    """
+    """Loads the graph data safely."""
     data = np.load(path)
-    # Extract Graph ID if available
+    # Handle older graph files that might not have uuid
     graph_uuid = str(data["uuid"]) if "uuid" in data else "unknown"
     return (data["adjacency"], data["positions"], data["passive_counts"], graph_uuid)
 
 
-def common_worker_setup(params):
-    """Shared setup logic for both workers.
-
-    Args:
-        params (dic): setup of parameters from the .yaml file.
-
-    Returns:
-        tupple: returns the array of the FhN parameters, the diffusion operator (Combinatory or Normalized Laplacian), the vector of passive nodes and the uuid of the graph.
+def create_model(params, adjacency, N_p):
     """
-    # 1. Load Graph
-    graph_path = params["graph_file_path"]
-    adjacency, pos, N_p, graph_uuid = load_graph_topology(graph_path)
-
-    # 2. Physics Operators
-    diffusion = params["diffusive_operator"]
-    diffusionOp = get_coupling_operator(adjacency, diffusion).astype(np.float64)
-
-    # 3. Physics Vector
-    p_vec = np.array(
-        [
-            params["a"],
-            params["alpha"],
-            params["epsilon"],
-            params["k"],
-            params["vrp"],
-            params["dt"],
-        ],
-        dtype=np.float64,
+    Instantiates the JIT-compiled Physics Model with CORRECT parameter mapping.
+    """
+    # 1. Determine Coupling Operator Type
+    diff_type = params.get("diffusive_operator", "Diffusive")
+    type_diff_code = 1 if diff_type == "Laplacian" else 0
+    coupling_op = np.ascontiguousarray(
+        get_coupling_operator(adjacency, diff_type), dtype=np.float64
+    )
+    coupling_str = float(params.get("epsilon", 0.1))
+    fhn_time_scale = float(params.get("fhn_eps", 0.01))
+    model = FitzHughNagumoModel(
+        coupling_op=coupling_op,
+        alpha=float(params.get("alpha", 0.5)),
+        eps=fhn_time_scale,  # Internal Physics (mapped from fhn_eps)
+        k=float(params.get("k", 1.0)),
+        vrp=float(params.get("vrp", 0.0)),
+        coupling_str=coupling_str,  # Network Coupling (mapped from epsilon)
+        dt=float(params.get("dt", 0.01)),
+        type_diff_code=type_diff_code,
+        cr=float(params.get("cr", 1.0)),
+        np_vec=N_p.astype(np.float64),  # Passive node counts vector
     )
 
-    return p_vec, diffusionOp, N_p, graph_uuid, diffusion
+    return model
+
+
+def common_worker_setup(params):
+    """Shared setup logic."""
+    graph_path = params["graph_file_path"]
+    adjacency, pos, N_p, graph_uuid = load_graph_topology(graph_path)
+    model = create_model(params, adjacency, N_p)
+    return model, graph_uuid
 
 
 def time_series(params):
-    """_summary_
-
-    Args:
-        params (_type_): _description_
-
-    Returns:
-        _type_: _description_
     """
-
-    # 1. Setup from Graph File
-    p_vec, diffusionOp, N_p, graph_uuid, diffusion = common_worker_setup(params)
+    Runs a full simulation and saves the trajectory.
+    """
+    # 1. Setup
+    model, graph_uuid = common_worker_setup(params)
     n_nodes = params["number_of_nodes"]
-    full_time = params.get("total_time")
 
-    # 2. Random State Init
+    # Total steps (Time / dt)
+    total_time_steps = int(params.get("total_time", 1000))
+
+    # 2. Random State Init (SoA Layout: 3 x N)
     rng = default_rng(params.get("seed", None))
-    State_0 = np.zeros((n_nodes, 3))
-    State_0[:, 0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[:, 1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[:, 2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
 
-    # 3. Run
-    FullData = evolve_system(
-        State_0,
-        full_time,
-        p_vec,
-        step_fhn_rk4,
-        N_p,
-        diffusionOp,
-        params["cr"],
-        diffusion,
+    State_0 = np.zeros((3, n_nodes), dtype=np.float64)
+    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)  # Voltage
+    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)  # Recovery
+    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)  # Passive
+
+    # 3. Run (Injection: Passing rk4_step)
+    full_data = evolve_system(
+        model, State_0, total_time_steps, input_signal=None, stepper_func=rk4_step
     )
 
-    # 4. Save
-    MY_FOLDER = params.get("output_folder", "Data_output")
-
-    # This allows you to find this specific file later easily
+    # 4. Save Logic
+    output_folder = params.get("output_folder", "Data_output")
     run_id = params.get("run_id", "manual")
-    filename = f"ts_N{n_nodes}_eps{params['epsilon']:.3f}_G-{graph_uuid}.h5"
-    save_path = os.path.join(MY_FOLDER, filename)
 
-    # Embed IDs into Metadata
+    # Filename using Coupling Constant (which is model.coupling_str)
+    coupling_val = model.coupling_str
+    filename = f"ts_N{n_nodes}_Coup{coupling_val:.3f}_G-{graph_uuid}.h5"
+    save_path = os.path.join(output_folder, filename)
+
+    # Metadata
     params_dict = params.copy()
     params_dict["graph_uuid"] = graph_uuid
     params_dict["run_uuid"] = run_id
+    # Record what we actually ran
+    params_dict["actual_fhn_eps"] = model.eps
+    params_dict["actual_coupling_str"] = model.coupling_str
 
-    transit_inter = full_time * 0.1
-    transitoire = params.get("transitory_time", transit_inter)
-    save_simulation_data(save_path, FullData[transitoire:], params_dict, "")
+    transitory = int(params.get("transitory_time", total_time_steps * 0.1))
+
+    save_simulation_data(save_path, full_data[transitory:], params_dict, "")
 
     return {}
 
 
 def run_order_parameter(params):
-    """_summary_
-
-    Args:
-        params (_type_): _description_
-
-    Returns:
-        _type_: _description_
+    """
+    Runs simulation and returns scalar metrics.
     """
     # 1. Setup
-    p_vec, DiffusionOp, N_p, graph_uuid, diffusion = common_worker_setup(params)
-    N_nodes = params["number_of_nodes"]
+    model, graph_uuid = common_worker_setup(params)
+    n_nodes = params["number_of_nodes"]
+    total_time_steps = int(params["total_time"])
 
     rng = default_rng(params.get("seed", None))
-    State_0 = np.zeros((N_nodes, 3))
-    State_0[:, 0] = 0.1 + 0.1 * rng.standard_normal(N_nodes)
 
-    # 2. Run, better to run again the simulation than loading really heavy ones
+    # State Init
+    State_0 = np.zeros((3, n_nodes), dtype=np.float64)
+    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
+
+    # 2. Run
     traj = evolve_system(
-        State_0,
-        params["total_time"],
-        p_vec,
-        step_fhn_rk4,
-        N_p,
-        DiffusionOp,
-        params["cr"],
-        diffusion,
+        model, State_0, total_time_steps, input_signal=None, stepper_func=rk4_step
     )
 
-    # 3. Measure HAVE TO BE ADAPT TO WORK IN A MORE GENERAL CONTEXT
-    start = params["transitory_time"]
+    # 3. Measure
+    start = int(params["transitory_time"])
 
-    results = {"epsilon": params["epsilon"], "cr": params["cr"]}
-    results["graph_uuid"] = graph_uuid  # Save which graph was used
+    # Extract Voltage (Index 0) for metrics
+    # Shape becomes (Time_Subset, N_Nodes)
+    voltage_data = traj[start:, 0, :]
 
-    Data = traj[start:, :, :]
+    results = {
+        # We save 'epsilon' as the coupling strength because that matches your config file keys
+        "epsilon": model.coupling_str,
+        "fhn_time_scale": model.eps,  # Explicitly log the physics parameter
+        "cr": model.c_r,
+        "graph_uuid": graph_uuid,
+    }
 
     metrics = params.get("metrics", ["sync_error"])
     for m in metrics:
         if m in AVAILABLE_METRICS:
-            results[m] = m(Data)
+            # Metrics must handle (Time, Nodes) input
+            results[m] = AVAILABLE_METRICS[m](voltage_data)
 
     return results

@@ -39,7 +39,7 @@ def get_coupling_operator(adjacency: np.ndarray, type_diff: str) -> np.ndarray:
 # --- FitzHugh-Nagumo Model ---
 
 fhn_spec: List[Tuple[str, Any]] = [
-    ("coupling_op", float64[:, :]),  # The matrix (N, N)
+    ("coupling_op", float64[:, ::1]),  # The matrix (N, N)
     ("a", float64),  # Parameter Alpha (Scalar)
     ("eps", float64),  # Epsilon
     ("k", float64),  # K (Passive)
@@ -124,7 +124,7 @@ class FitzHughNagumoModel:
 # --- Henon Map Model ---
 
 henon_spec: List[Tuple[str, Any]] = [
-    ("coupling_op", float64[:, :]),
+    ("coupling_op", float64[:, ::1]),
     ("a", float64),
     ("b", float64),
     ("coupling_str", float64),

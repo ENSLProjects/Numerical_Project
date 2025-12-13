@@ -1,4 +1,4 @@
-#!/usr/bin/env/python3
+#!/usr/bin/env python3
 
 # ======================= Libraries
 
@@ -10,8 +10,9 @@ import sys
 import time
 import shutil
 import uuid
+from tqdm import tqdm
 
-from bnn_package import save_result, load_config
+from bnn_package import save_result, load_config, corrupted_simulation
 from workers import run_order_parameter, time_series
 
 
@@ -19,43 +20,31 @@ from workers import run_order_parameter, time_series
 
 
 def archive_graph(config, result_dir):
-    """
-    Manages Graph Provenance.
-    Strictly expects the config to point to an existing graph file
-    (which is guaranteed if you use generate_config.py).
-
-    It copies that graph into the result directory so the experiment
-    is self-contained.
-    """
+    """Archiving Graph Logic."""
     source_path = config.get("existing_graph_path")
-
-    # Enforce the Factory Workflow
     if not source_path or not os.path.exists(source_path):
+        if config.get("generate_graph", False):
+            return None
         print("\n>>> CRITICAL ERROR: Graph file missing!")
-        print(f"    The config points to: {source_path}")
-        print("    Please use 'generate_config.py' to create your experiments.")
-        print("    It guarantees a valid graph is created and linked.")
+        print(f"    Path: {source_path}")
         sys.exit(1)
 
     print("\n>>> GRAPH PROVENANCE")
     print(f"    Source:   {source_path}")
-
-    # Copy the graph file to the result folder (Archiving)
     filename = os.path.basename(source_path)
     dest_path = os.path.join(result_dir, filename)
     shutil.copy(source_path, dest_path)
-
     print(f"    Archived: {dest_path}")
     return dest_path
 
 
 def generate_tasks(config):
-    """Create the grid of parameters to run over."""
+    """Grid Search Generator."""
     fixed_params = {}
     sweep_keys = []
     sweep_values = []
 
-    # Define keys to NEVER sweep
+    # Parameters that should NOT be split into permutations
     NON_SWEEP = [
         "square_for_graph",
         "metrics",
@@ -82,112 +71,83 @@ def generate_tasks(config):
 
 def main():
     # --- LOAD CONFIG ---
-    config_path = "run/config/config_phase_scan.yaml"
+    config_path = "run/configs/config_phase_scan.yaml"
     if len(sys.argv) > 1:
         config_path = sys.argv[1]
+
     if not os.path.exists(config_path):
-        print("Error: Config path not found.")
+        print(f"Error: Config not found at {config_path}")
         return
+
     config = load_config(config_path)
 
-    # --- NAME CLEANER (Fixing the Double Date issue) ---
-    # 1. Get the full filename (e.g., "20251208_183347_debugging.yaml")
+    # --- SETUP OUTPUT ---
     raw_name = os.path.splitext(os.path.basename(config_path))[0]
-
-    # 2. Try to split by underscores to find the real name
-    # We expect format: YYYYMMDD_HHMMSS_Name
-    parts = raw_name.split("_", 2)
-
-    if (
-        len(parts) >= 3
-        and parts[0].isdigit()
-        and parts[1].isdigit()
-        and len(parts[0]) == 8
-    ):
-        # It matches the generator pattern! Use only the name part.
-        clean_experiment_name = parts[2]
-    else:
-        # It's a custom manual name, keep it as is.
-        clean_experiment_name = raw_name
-
-    # --- RUN PROVENANCE ---
     run_uuid = str(uuid.uuid4())[:8]
     timestamp = time.strftime("%Y%m%d-%H%M%S")
 
-    # Folder: Date_Name_RunID
-    result_dir = os.path.join("Data_output", f"{timestamp}_{clean_experiment_name}")
+    result_dir = os.path.join("Data_output", f"{timestamp}_{raw_name}")
     os.makedirs(result_dir, exist_ok=True)
 
-    # Snapshot Config
     shutil.copy(config_path, os.path.join(result_dir, f"config_{run_uuid}.yaml"))
-    output_file = os.path.join(result_dir, config.get("output_file", "results.csv"))
 
-    print(f"\n{'=' * 60}")
-    print(f">>> RUN ID:   {run_uuid}")
-    print(f"    Folder:   {result_dir}")
-
-    # --- GRAPH MANAGEMENT ---
     graph_path = archive_graph(config, result_dir)
 
-    # --- GENERATE TASKS ---
+    # --- PREPARE TASKS ---
     mode = config.get("mode", "sweep")
     target_function = time_series if mode == "time_series" else run_order_parameter
 
     tasks, sweep_vars = generate_tasks(config)
 
-    # INJECT PROVENANCE INTO EVERY TASK
     for task in tasks:
         task["output_folder"] = result_dir
         task["run_id"] = run_uuid
         task["graph_file_path"] = graph_path
 
-    # --- PARALLEL EXECUTION ---
+    # --- EXECUTION ---
     use_parallel = config.get("parallel", False)
     ratio_cpu = config.get("cores_ratio", 0.8)
-    n_cores = max(
-        1, int(multiprocessing.cpu_count() * config.get("cores_ratio", ratio_cpu))
-    )
+    n_cores = max(1, int(multiprocessing.cpu_count() * ratio_cpu))
 
-    if not use_parallel:
-        print(f"\n>>> SEQUENTIAL ({n_cores} threads)")
-        os.environ["OMP_NUM_THREADS"] = str(n_cores)
-    else:
-        print(f"\n>>> PARALLEL ({n_cores} procs)")
-        os.environ["OMP_NUM_THREADS"] = "1"
+    output_file = os.path.join(result_dir, config.get("output_file", "results.csv"))
 
+    print(f"\n{'=' * 60}")
+    print(f">>> RUN ID:   {run_uuid}")
+    print(f"    Mode:     {mode}")
     print(f"    Sweeping: {sweep_vars}")
-    print(f"    Jobs:     {len(tasks)}")
+    print(f"    Tasks:    {len(tasks)}")
+    print(f"    Parallel: {use_parallel} ({n_cores} cores)")
     print(f"{'=' * 60}\n")
 
     start_time = time.time()
 
     if use_parallel:
+        print(">>> Starting Multiprocessing Pool...")
+        os.environ["OMP_NUM_THREADS"] = "1"
         with multiprocessing.Pool(n_cores) as pool:
-            try:
-                from tqdm import tqdm
-
-                iterator = tqdm(
+            # imap_unordered + tqdm for real-time progress
+            results = list(
+                tqdm(
                     pool.imap_unordered(target_function, tasks),
                     total=len(tasks),
-                    ncols=80,  # Limits width to 80 chars (prevents flickering)
                     unit="sim",
+                    ncols=80,
                 )
-            except ImportError:
-                iterator = pool.imap_unordered(target_function, tasks)
-            for i, res in enumerate(iterator):
+            )
+            for i, res in enumerate(results):
                 save_result(res, i, output_file, mode)
     else:
-        from tqdm import tqdm
-
-        for i, task in enumerate(tqdm(tasks, ncols=80, unit="sim")):
+        print(">>> Starting Sequential Loop...")
+        os.environ["OMP_NUM_THREADS"] = str(n_cores)
+        for i, task in enumerate(tqdm(tasks, unit="sim", ncols=80)):
             res = target_function(task)
             save_result(res, i, output_file, mode)
 
-    end_time = time.time()
-
-    print(f"\n>>> SIMULATION SUCCESSFULLY COMPLETED IN {end_time - start_time:.3f}s")
-    print(f"\n>>> DONE: Saved to {result_dir}")
+    print(f"\n>>> COMPLETED in {time.time() - start_time:.2f}s")
+    print(f">>> Results in: {result_dir}")
 
 
 if __name__ == "__main__":
-    main()
+    corrupted_simulation(
+        "Data_output/20251213-200022_debugging/ts_N1000_Coup0.080_G-c1bef87d.h5"
+    )
