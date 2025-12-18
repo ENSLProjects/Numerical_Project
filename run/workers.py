@@ -39,11 +39,11 @@ def create_model(params, adjacency, N_p):
         get_coupling_operator(adjacency, diff_type), dtype=np.float64
     )
     coupling_str = float(params.get("epsilon", 0.1))
-    fhn_time_scale = float(params.get("fhn_eps", 0.01))
+    fhn_eps = float(params.get("fhn_eps", 0.01))
     model = FitzHughNagumoModel(
         coupling_op=coupling_op,
         alpha=float(params.get("alpha", 0.5)),
-        eps=fhn_time_scale,  # Internal Physics (mapped from fhn_eps)
+        fhn_eps=fhn_eps,  # Internal Physics (mapped from fhn_eps)
         k=float(params.get("k", 1.0)),
         vrp=float(params.get("vrp", 0.0)),
         coupling_str=coupling_str,  # Network Coupling (mapped from epsilon)
@@ -94,7 +94,8 @@ def time_series(params):
 
     # Filename using Coupling Constant (which is model.coupling_str)
     coupling_val = model.coupling_str
-    filename = f"ts_N{n_nodes}_Coup{coupling_val:.3f}_G-{graph_uuid}.h5"
+    cr_val = model.c_r
+    filename = f"ts_N{n_nodes}_Coup{coupling_val:.3f}_cr{cr_val:.3f}_G-{graph_uuid}.h5"
     save_path = os.path.join(output_folder, filename)
 
     # Metadata
@@ -102,7 +103,7 @@ def time_series(params):
     params_dict["graph_uuid"] = graph_uuid
     params_dict["run_uuid"] = run_id
     # Record what we actually ran
-    params_dict["actual_fhn_eps"] = model.eps
+    params_dict["actual_fhn_eps"] = model.fhn_eps
     params_dict["actual_coupling_str"] = model.coupling_str
 
     transitory = int(params.get("transitory_time", total_time_steps * 0.1))
@@ -142,7 +143,7 @@ def run_order_parameter(params):
     results = {
         # We save 'epsilon' as the coupling strength because that matches your config file keys
         "epsilon": model.coupling_str,
-        "fhn_time_scale": model.eps,  # Explicitly log the physics parameter
+        "fhn_eps": model.fhn_eps,  # Explicitly log the physics parameter
         "cr": model.c_r,
         "graph_uuid": graph_uuid,
     }
