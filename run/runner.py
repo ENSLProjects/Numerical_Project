@@ -12,7 +12,8 @@ import shutil
 import uuid
 from tqdm import tqdm
 
-from bnn_package import save_result, load_config, corrupted_simulation
+os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+from bnn_package import save_result, load_config, corrupted_simulation  # noqa: F401
 from workers import run_order_parameter, time_series
 
 
@@ -148,6 +149,4 @@ def main():
 
 
 if __name__ == "__main__":
-    corrupted_simulation(
-        "Data_output/20251213-200022_debugging/ts_N1000_Coup0.080_G-c1bef87d.h5"
-    )
+    main()

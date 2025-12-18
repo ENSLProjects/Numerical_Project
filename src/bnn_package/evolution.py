@@ -41,7 +41,7 @@ def get_coupling_operator(adjacency: np.ndarray, type_diff: str) -> np.ndarray:
 fhn_spec: List[Tuple[str, Any]] = [
     ("coupling_op", float64[:, ::1]),  # The matrix (N, N)
     ("a", float64),  # Parameter Alpha (Scalar)
-    ("eps", float64),  # Epsilon
+    ("fhn_eps", float64),  # Epsilon
     ("k", float64),  # K (Passive)
     ("v_rp", float64),  # Resting Potential
     ("coupling_str", float64),  # Sigma (Coupling strength)
@@ -58,7 +58,7 @@ class FitzHughNagumoModel:
         self,
         coupling_op,
         alpha,
-        eps,
+        fhn_eps,
         k,
         vrp,
         coupling_str,
@@ -69,7 +69,7 @@ class FitzHughNagumoModel:
     ):
         self.coupling_op = coupling_op
         self.a = alpha
-        self.eps = eps
+        self.fhn_eps = fhn_eps
         self.k = k
         self.v_rp = vrp
         self.coupling_str = coupling_str
@@ -108,7 +108,7 @@ class FitzHughNagumoModel:
         )
 
         # dw/dt
-        dw = self.eps * (v - w)
+        dw = self.fhn_eps * (v - w)
 
         # dv_p/dt
         dv_p = self.k * (self.v_rp - v_p) - passive_interaction

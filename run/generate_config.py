@@ -96,11 +96,11 @@ def create_experiment_config(experiment_name, **kwargs):
         "alpha": 0.2,  # Threshold parameter 'a'
         "k": 0.25,  # Passive Coupling Strength
         "vrp": 1.5,  # Resting Potential
-        "cr": 1.0,  # Resistive Coupling Strength
         "fhn_eps": 0.01,  # Time Scale Separation (Internal Physics)
         # --- SWEEP PARAMETERS ---
         "epsilon": 0.1,  # NETWORK COUPLING STRENGTH (Sigma)
         "metrics": ["sync_error"],
+        "cr": 1.0,  # Resistive Coupling Strength
         # --- PROVENANCE ---
         "existing_graph_path": None,  # Will be filled automatically
     }
@@ -135,9 +135,8 @@ if __name__ == "__main__":
     create_experiment_config(
         "debugging",
         mode="time_series",  # We want trajectories, not just scalar metrics
-        total_time=300000,  # Shorter time for debugging
+        total_time=50000,  # Shorter time for debugging
         number_of_nodes=1000,  # Smaller graph for debugging
         epsilon=[0.08, 0.1],  # List = Sweep two values
-        cr=1.5,
-        fhn_eps=0.01,  # Explicitly setting the time scale
+        cr=[1.1, 1.5],
     )
