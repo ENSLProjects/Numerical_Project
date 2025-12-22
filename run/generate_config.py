@@ -42,7 +42,10 @@ def build_and_save_graph(config, registry_dir):
     adjacency = connexion_normal_deterministic(pos, rng, config["std"])
 
     print("\n ---------> Graph Generated")
-    print_simulation_report(adjacency, fast_mode=True)  # Fast mode for cleaner logs
+    which_analysis = config.get("quick_analyze_graph", True)
+    print_simulation_report(
+        adjacency, fast_mode=which_analysis
+    )  # Fast mode for cleaner logs
 
     # 3. Add Passive Nodes
     G = nx.from_numpy_array(adjacency)
@@ -82,6 +85,7 @@ def create_experiment_config(experiment_name, **kwargs):
         "cores_ratio": 0.8,
         "output_folder": "Data_output",
         "seed": 1234567890,
+        "quick_analyze_graph": False,
         # --- GRAPH ARCHITECTURE ---
         "number_of_nodes": 1000,
         "square_for_graph": [10.0, 10.0],
@@ -133,10 +137,17 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(
-        "debugging",
-        mode="time_series",  # We want trajectories, not just scalar metrics
-        total_time=50000,  # Shorter time for debugging
-        number_of_nodes=1000,  # Smaller graph for debugging
-        epsilon=[0.08, 0.1],  # List = Sweep two values
-        cr=[1.1, 1.5],
+        "forced_sustained_spikes_smallcoupling",
+        mode="time_series",
+        quick_analyze_graph=False,
+        parallel=True,
+        alpha=-0.1,  # Threshold
+        vrp=1.0,  # High drive to force instability
+        fhn_eps=0.01,  # Time-scale separation
+        k=0.01,  # Slow passive node dynamics
+        cr=0.05,
+        total_time=100000,
+        transitory_time=0,
+        epsilon=[0.01, 0.03, 0.05, 0.08],
+        existing_graph_path="Data_output/graphs_registry/graph_N1000_std1.0_1967bad5.npz",
     )
