@@ -97,10 +97,11 @@ def create_experiment_config(experiment_name, **kwargs):
         "transitory_time": 10000,  # Washout Steps
         "dt": 0.01,
         # Model Parameters
-        "alpha": 0.2,  # Threshold parameter 'a'
+        "alpha": 0.2,  # Parameter alpha
+        "a": 3.0,
         "k": 0.25,  # Passive Coupling Strength
         "vrp": 1.5,  # Resting Potential
-        "fhn_eps": 0.01,  # Time Scale Separation (Internal Physics)
+        "fhn_eps": 0.08,  # Time Scale Separation (Internal Physics)
         # --- SWEEP PARAMETERS ---
         "epsilon": 0.1,  # NETWORK COUPLING STRENGTH (Sigma)
         "metrics": ["sync_error"],
@@ -137,17 +138,12 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(
-        "forced_sustained_spikes_smallcoupling",
+        "paper_config_for_CS",
         mode="time_series",
         quick_analyze_graph=False,
         parallel=True,
-        alpha=-0.1,  # Threshold
-        vrp=1.0,  # High drive to force instability
-        fhn_eps=0.01,  # Time-scale separation
-        k=0.01,  # Slow passive node dynamics
-        cr=0.05,
+        cr=0.4,
         total_time=100000,
         transitory_time=0,
         epsilon=[0.01, 0.03, 0.05, 0.08],
-        existing_graph_path="Data_output/graphs_registry/graph_N1000_std1.0_1967bad5.npz",
     )

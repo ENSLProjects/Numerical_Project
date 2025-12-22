@@ -38,19 +38,26 @@ def create_model(params, adjacency, N_p):
     coupling_op = np.ascontiguousarray(
         get_coupling_operator(adjacency, diff_type), dtype=np.float64
     )
-    coupling_str = float(params.get("epsilon", 0.1))
-    fhn_eps = float(params.get("fhn_eps", 0.01))
+    coupling_str = float(params.get("epsilon", 0.01))
+    fhn_eps = float(params.get("fhn_eps", 0.08))
+    alpha = float(params.get("alpha", 0.2))
+    k = float(params.get("k", 0.25))
+    dt = float(params.get("dt", 0.01))
+    cr = float(params.get("cr", 1.0))
+    a = float(params.get("a", 3.0))
+    vrp = float(params.get("vrp", 1.5))
     model = FitzHughNagumoModel(
         coupling_op=coupling_op,
-        alpha=float(params.get("alpha", 0.5)),
+        alpha=alpha,
         fhn_eps=fhn_eps,  # Internal Physics (mapped from fhn_eps)
-        k=float(params.get("k", 1.0)),
-        vrp=float(params.get("vrp", 0.0)),
+        k=k,
+        vrp=vrp,
         coupling_str=coupling_str,  # Network Coupling (mapped from epsilon)
-        dt=float(params.get("dt", 0.01)),
+        dt=dt,
         type_diff_code=type_diff_code,
-        cr=float(params.get("cr", 1.0)),
+        cr=cr,
         np_vec=N_p.astype(np.float64),  # Passive node counts vector
+        a=a,
     )
 
     return model

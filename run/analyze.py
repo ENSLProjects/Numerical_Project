@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from pathlib import Path
+from scipy.spatial import KDTree
 from bnn_package import load_simulation_data, prepare_data, compute_te_over_lags
 
 
@@ -427,7 +428,103 @@ def animate_simulation(file_path, fps=30, steps_per_second=2000):
     return ani
 
 
+def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
+    """
+    Advanced animation with a clickable node tracer.
+    """
+    # 1. Load Data
+    data = load_simulation_data(file_path, graph=True, load_trajectory=True)
+    trajectory = data["trajectory"]  # Shape: (Time, Variables, Nodes)
+    pos = data["graph"]["positions"]
+    params = data["parameters"]
+
+    if pos.shape[0] == 2:
+        pos = pos.T
+
+    # Pre-build a KDTree for lightning-fast click detection
+    tree = KDTree(pos)
+
+    # 2. Timing and Slicing
+    dt = float(params.get("dt", 0.01))
+    step_skip = max(1, int(steps_per_second / fps))
+    voltages = trajectory[::step_skip, 0, :]
+    full_time_axis = np.arange(trajectory.shape[0]) * dt
+
+    v_min, v_max = np.min(voltages), np.max(voltages)
+
+    # 3. Setup Figure (2 Columns: Animation | Time Series)
+    fig = plt.figure(figsize=(15, 7))
+    ax_sim = fig.add_subplot(121)
+    ax_trace = fig.add_subplot(122)
+
+    # Animation Plot
+    scatter = ax_sim.scatter(
+        pos[:, 0],
+        pos[:, 1],
+        c=voltages[0, :],
+        cmap="magma",
+        s=40,
+        edgecolors="black",
+        linewidths=0.2,
+        vmin=v_min,
+        vmax=v_max,
+    )
+    ax_sim.set_aspect("equal")
+    ax_sim.axis("off")
+    title = ax_sim.set_title("Click a node to trace")
+
+    # Trace Plot (Initialize with Node 0)
+    current_node = 0
+    (line,) = ax_trace.plot(
+        full_time_axis, trajectory[:, 0, current_node], color="crimson", lw=1.5
+    )
+    time_marker = ax_trace.axvline(0, color="black", linestyle="--", alpha=0.5)
+    ax_trace.set_title(f"Voltage Trace: Node {current_node}")
+    ax_trace.set_xlabel("Time (s)")
+    ax_trace.set_ylabel("Voltage ($V_e$)")
+    ax_trace.grid(True, alpha=0.3)
+    ax_trace.set_ylim(v_min - 0.1, v_max + 0.1)
+
+    # 4. Interactive Click Logic
+    def on_click(event):
+        nonlocal current_node
+        if event.inaxes != ax_sim:
+            return
+
+        # Find nearest node to the click
+        dists, idx = tree.query([event.xdata, event.ydata])
+        current_node = idx
+
+        # Update the line data for the new node
+        line.set_ydata(trajectory[:, 0, current_node])
+        ax_trace.set_title(f"Voltage Trace: Node {current_node}")
+        fig.canvas.draw_idle()
+
+    fig.canvas.mpl_connect("button_press_event", on_click)
+
+    # 5. Animation Update
+    def update(frame):
+        # Update spatial colors
+        scatter.set_array(voltages[frame, :])
+
+        # Update time marker in the trace plot
+        current_time = frame * step_skip * dt
+        time_marker.set_xdata([current_time])
+
+        title.set_text(f"Time: {current_time:.2f}s | Node: {current_node}")
+        return scatter, time_marker, title
+
+    # 6. Run
+    ani = animation.FuncAnimation(
+        fig, update, frames=voltages.shape[0], interval=int(1000 / fps), blit=False
+    )
+
+    plt.tight_layout()
+    plt.show()
+    return ani
+
+
 if __name__ == "__main__":
-    animate_simulation(
-        "Data_output/20251222-123843_forced_sustained_spikes_smallcoupling/ts_N1000_Coup0.010_cr0.050_G-1967bad5.h5"
+    animate_with_tracer(
+        "Data_output/20251222-150959_paper_config_for_CS/ts_N1000_Coup0.010_cr0.400_G-14a3d326.h5"
     )
