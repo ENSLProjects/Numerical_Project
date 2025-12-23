@@ -40,7 +40,8 @@ def get_coupling_operator(adjacency: np.ndarray, type_diff: str) -> np.ndarray:
 
 fhn_spec: List[Tuple[str, Any]] = [
     ("coupling_op", float64[:, ::1]),  # The matrix (N, N)
-    ("a", float64),  # Parameter Alpha (Scalar)
+    ("a", float64),  # Parameter A (Scalar)
+    ("alpha", float64),
     ("fhn_eps", float64),  # Epsilon
     ("k", float64),  # K (Passive)
     ("v_rp", float64),  # Resting Potential
@@ -58,6 +59,7 @@ class FitzHughNagumoModel:
         self,
         coupling_op,
         alpha,
+        a,
         fhn_eps,
         k,
         vrp,
@@ -68,7 +70,8 @@ class FitzHughNagumoModel:
         np_vec,
     ):
         self.coupling_op = coupling_op
-        self.a = alpha
+        self.alpha = alpha
+        self.a = a
         self.fhn_eps = fhn_eps
         self.k = k
         self.v_rp = vrp
@@ -90,19 +93,17 @@ class FitzHughNagumoModel:
         interaction = self.coupling_op @ v
 
         if self.type_diff == 1:  # Laplacian
-            coupling_term = self.coupling_str * interaction
+            coupling_term = -self.coupling_str * interaction
         else:  # Diffusive
-            coupling_term = (
-                1.0 - self.coupling_str
-            ) * v + self.coupling_str * interaction
+            coupling_term = self.coupling_str * (interaction - v)
 
         passive_interaction = self.c_r * (v_p - v)
 
         # dv/dt
         dv = (
-            (v * (v - self.a) * (1.0 - v))  # Local Dynamics
+            self.a * (v * (v - self.alpha) * (1.0 - v))  # Local Dynamics
             - w  # Recovery
-            - coupling_term  # Network Diffusion
+            + coupling_term  # Network Diffusion
             + current_input  # External Input
             + (passive_interaction * self.n_p)  # Feedback from passive nodes
         )

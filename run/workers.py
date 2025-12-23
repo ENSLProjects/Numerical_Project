@@ -38,19 +38,26 @@ def create_model(params, adjacency, N_p):
     coupling_op = np.ascontiguousarray(
         get_coupling_operator(adjacency, diff_type), dtype=np.float64
     )
-    coupling_str = float(params.get("epsilon", 0.1))
-    fhn_eps = float(params.get("fhn_eps", 0.01))
+    coupling_str = float(params.get("epsilon", 0.01))
+    fhn_eps = float(params.get("fhn_eps", 0.08))
+    alpha = float(params.get("alpha", 0.2))
+    k = float(params.get("k", 0.25))
+    dt = float(params.get("dt", 0.01))
+    cr = float(params.get("cr", 1.0))
+    a = float(params.get("a", 3.0))
+    vrp = float(params.get("vrp", 1.5))
     model = FitzHughNagumoModel(
         coupling_op=coupling_op,
-        alpha=float(params.get("alpha", 0.5)),
+        alpha=alpha,
         fhn_eps=fhn_eps,  # Internal Physics (mapped from fhn_eps)
-        k=float(params.get("k", 1.0)),
-        vrp=float(params.get("vrp", 0.0)),
+        k=k,
+        vrp=vrp,
         coupling_str=coupling_str,  # Network Coupling (mapped from epsilon)
-        dt=float(params.get("dt", 0.01)),
+        dt=dt,
         type_diff_code=type_diff_code,
-        cr=float(params.get("cr", 1.0)),
+        cr=cr,
         np_vec=N_p.astype(np.float64),  # Passive node counts vector
+        a=a,
     )
 
     return model
@@ -75,40 +82,31 @@ def time_series(params):
     # Total steps (Time / dt)
     total_time_steps = int(params.get("total_time", 1000))
 
-    # 2. Random State Init (SoA Layout: 3 x N)
+    # 2. Random State Init
     rng = default_rng(params.get("seed", None))
 
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)  # Voltage
-    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)  # Recovery
-    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)  # Passive
+    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
 
-    # 3. Run (Injection: Passing rk4_step)
+    # 3. Run
     full_data = evolve_system(
         model, State_0, total_time_steps, input_signal=None, stepper_func=rk4_step
     )
 
     # 4. Save Logic
     output_folder = params.get("output_folder", "Data_output")
-    run_id = params.get("run_id", "manual")
 
-    # Filename using Coupling Constant (which is model.coupling_str)
+    # Filename using Coupling Constant
     coupling_val = model.coupling_str
     cr_val = model.c_r
     filename = f"ts_N{n_nodes}_Coup{coupling_val:.3f}_cr{cr_val:.3f}_G-{graph_uuid}.h5"
     save_path = os.path.join(output_folder, filename)
 
-    # Metadata
-    params_dict = params.copy()
-    params_dict["graph_uuid"] = graph_uuid
-    params_dict["run_uuid"] = run_id
-    # Record what we actually ran
-    params_dict["actual_fhn_eps"] = model.fhn_eps
-    params_dict["actual_coupling_str"] = model.coupling_str
-
     transitory = int(params.get("transitory_time", total_time_steps * 0.1))
 
-    save_simulation_data(save_path, full_data[transitory:], params_dict, "")
+    save_simulation_data(save_path, full_data[transitory:], graph_uuid)
 
     return {}
 

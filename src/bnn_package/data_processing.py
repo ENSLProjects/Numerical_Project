@@ -1,4 +1,4 @@
-#!/usr/bin/env/python3
+#!/usr/bin/env python3
 
 # ======================= Libraries
 
@@ -7,8 +7,6 @@ import os
 import h5py
 from typing import cast
 import numpy as np
-import networkx as nx
-import json
 from datetime import datetime
 from pathlib import Path
 import pandas as pd
@@ -104,9 +102,14 @@ def json_numpy_serializer(obj):
     raise TypeError(f"Type {type(obj)} not serializable")
 
 
-def save_simulation_data(file_path, trajectory, parameters, graph_path):
+def save_simulation_data(file_path, trajectory, graph_uuid):
     """
-    Saves heavy data to HDF5, embeds parameters as JSON, and links the graph file.
+    Saves the trajectory data and the graph UUID to HDF5.
+
+    Args:
+        file_path (str): Output path.
+        trajectory (np.ndarray): Simulation data.
+        graph_uuid (str): The unique identifier of the graph used.
     """
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
 
@@ -118,10 +121,7 @@ def save_simulation_data(file_path, trajectory, parameters, graph_path):
             compression_opts=4,
             shuffle=True,
         )
-
-        param_str = json.dumps(parameters, default=json_numpy_serializer)
-        f.attrs["parameters"] = param_str
-        f.attrs["linked_graph_path"] = graph_path
+        f.attrs["graph_uuid"] = str(graph_uuid)
 
 
 def save_result(res, i, output_file, mode):
@@ -132,57 +132,66 @@ def save_result(res, i, output_file, mode):
     df_temp.to_csv(output_file, mode="a", header=header, index=False)
 
 
-def load_simulation_data(file_path, graph: bool):
-    """Loads trajectory, parameters, and the linked graph if wanted.
+def load_simulation_data(file_path, graph: bool = False, load_trajectory: bool = True):
+    """
+    Loads simulation data.
+    Can skip loading the heavy trajectory if only metadata/graph is needed.
 
     Args:
-        file_path (str): relative path to the file
-        graph (bool): True if you want to load the graph as a networkx graph.
-
-    Raises:
-        FileNotFoundError: the path doen't exist
+        file_path (str): Path to the .h5 file.
+        graph (bool): If True, loads the .npz graph topology.
+        load_trajectory (bool): If False, skips loading the heavy time-series data.
 
     Returns:
-        _type_: return the full data of the simulation.
+        dict: Contains 'parameters', 'graph_uuid', optionally 'graph' and 'trajectory'.
     """
-    if not os.path.exists(file_path):
+    path_obj = Path(file_path).resolve()
+    if not path_obj.exists():
         raise FileNotFoundError(f"{file_path} not found.")
+
     data = {}
-    with h5py.File(file_path, "r") as f:
-        # 1. Trajectory
-        data["trajectory"] = get_data(f, "trajectory")
+    parent_dir = path_obj.parent
 
-        # 2. Parameters (JSON String -> Dict)
-        param_str = f.attrs["parameters"]
-        # Fix for HDF5 bytes/string difference
-        if isinstance(param_str, bytes):
-            param_str = param_str.decode("utf-8")
-        elif isinstance(param_str, np.ndarray):
-            param_str = str(param_str.item())
-        elif not isinstance(param_str, str):
-            param_str = str(param_str)
-        data["parameters"] = json.loads(param_str)
-
-        # 3. Get Graph Path
-        graph_path = f.attrs["linked_graph_path"]
-        if isinstance(graph_path, bytes):
-            graph_path = graph_path.decode("utf-8")
-        elif isinstance(graph_path, np.ndarray):
-            graph_path = str(graph_path.item())
-        elif not isinstance(graph_path, str):
-            graph_path = str(graph_path)
-    if graph:
-        # 4. Load Graph (External file)
-        if os.path.exists(graph_path):
-            data["graph"] = nx.read_graphml(graph_path)
+    # ================= 1. HDF5 Access (Lightweight vs Heavy) =================
+    with h5py.File(path_obj, "r") as f:
+        # Always get the UUID for provenance
+        if "graph_uuid" in f.attrs:
+            uuid_val = f.attrs["graph_uuid"]
+            if isinstance(uuid_val, bytes):
+                uuid_val = uuid_val.decode("utf-8")
+            data["graph_uuid"] = uuid_val
         else:
-            # If graph is missing, we just return None (or raise Error if you prefer)
-            print(f"Warning: Graph file missing at {graph_path}")
-            data["graph"] = None
-    else:
-        print("\nGraph not loaded")
+            data["graph_uuid"] = "unknown"
 
-    print("\n DATA SUCCESFULLT LOADED")
+        # OPTIONAL: Load heavy trajectory
+        if load_trajectory:
+            data["trajectory"] = get_data(f, "trajectory")
+        else:
+            data["trajectory"] = None
+
+    # ================= 2. Load Parameters (YAML) =================
+    config_files = list(parent_dir.glob("config_*.yaml"))
+    if not config_files:
+        raise FileNotFoundError(f"No config_*.yaml found in {parent_dir}")
+
+    config_path = config_files[0]
+    data["parameters"] = load_config(str(config_path))
+
+    # ================= 3. Load Graph (.npz) =================
+    if graph:
+        orig_graph_path = data["parameters"].get("existing_graph_path")
+        if orig_graph_path:
+            filename = os.path.basename(orig_graph_path)
+            local_graph_path = parent_dir / filename
+
+            if local_graph_path.exists() and local_graph_path.suffix == ".npz":
+                # Load efficient dict of arrays
+                data["graph"] = dict(np.load(str(local_graph_path)))
+            else:
+                print(f"Warning: Graph .npz not found at {local_graph_path}")
+                data["graph"] = None
+        else:
+            data["graph"] = None
 
     return data
 
