@@ -148,7 +148,7 @@ venv_numproject/
 ENV/
 env.bak/
 venv.bak/
-
+Poster/*
 # Spyder project settings
 .spyderproject
 .spyproject

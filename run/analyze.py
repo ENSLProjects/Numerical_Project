@@ -526,5 +526,5 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
 
 if __name__ == "__main__":
     animate_with_tracer(
-        "Data_output/20251222-150959_paper_config_for_CS/ts_N1000_Coup0.010_cr0.400_G-14a3d326.h5"
+        "Data_output/20251222-161811_paper_config_for_CS/ts_N1000_Coup0.100_cr0.400_G-d620069f.h5"
     )

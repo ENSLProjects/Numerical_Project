@@ -145,5 +145,7 @@ if __name__ == "__main__":
         cr=0.4,
         total_time=100000,
         transitory_time=0,
-        epsilon=[0.01, 0.03, 0.05, 0.08],
+        mean_poisson=0.7,
+        epsilon=[0.01, 0.05, 0.08, 0.1],
+        std=0.9,
     )
