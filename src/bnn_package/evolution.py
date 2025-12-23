@@ -93,11 +93,9 @@ class FitzHughNagumoModel:
         interaction = self.coupling_op @ v
 
         if self.type_diff == 1:  # Laplacian
-            coupling_term = self.coupling_str * interaction
+            coupling_term = -self.coupling_str * interaction
         else:  # Diffusive
-            coupling_term = (
-                1.0 - self.coupling_str
-            ) * v + self.coupling_str * interaction
+            coupling_term = self.coupling_str * (interaction - v)
 
         passive_interaction = self.c_r * (v_p - v)
 
