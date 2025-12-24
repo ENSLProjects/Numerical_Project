@@ -149,4 +149,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    corrupted_simulation(
+        "Data_output/20251224-175714_test_optimal_dt/ts_N1000_Coup4.000_cr0.800_G-60409aeb.h5"
+    )

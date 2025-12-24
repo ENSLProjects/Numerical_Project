@@ -28,6 +28,39 @@ def load_graph_topology(path):
     return (data["adjacency"], data["positions"], data["passive_counts"], graph_uuid)
 
 
+def get_stable_dt(params, adjacency):
+    """
+    Heuristic to determine a stable dt for FitzHugh-Nagumo.
+    Accounts for stiffness (fhn_eps) and network coupling (spectral radius).
+    """
+    # 1. Local Dynamics: Stability is limited by the fast/slow timescale ratio
+    # If fhn_eps is very small, the recovery variable 'w' is much slower than 'v'
+    fhn_eps = float(params.get("fhn_eps", 0.08))
+    tau_local = 1.0 / fhn_eps
+
+    # 2. Network Dynamics: Stability is limited by the coupling strength and graph
+    # For Laplacian/Diffusive operators, we estimate the spectral radius
+    coupling_str = float(params.get("epsilon", 0.01))
+    diff_type = params.get("diffusive_operator", "Diffusive")
+
+    if diff_type == "Laplacian":
+        # Gershgorin circle theorem upper bound for Laplacian: 2 * max_degree
+        degrees = np.sum(adjacency, axis=1)
+        spec_radius = 2.0 * np.max(degrees)
+    else:
+        # For diffusive/row-normalized matrices, the max eigenvalue is ~1
+        spec_radius = 1.0
+
+    tau_net = 1.0 / (coupling_str * spec_radius)
+
+    # 3. Apply safety margin (RK4 typically requires dt < 10% of fastest timescale)
+    # We take the minimum of local, network, and a baseline safety value (0.05)
+    suggested_dt = min(tau_local, tau_net, 1.0) * 0.05
+
+    # Ensure it's not too small (performance) or too large (instability)
+    return max(min(suggested_dt, 0.01), 0.001)
+
+
 def create_model(params, adjacency, N_p):
     """
     Instantiates the JIT-compiled Physics Model with CORRECT parameter mapping.
@@ -42,7 +75,7 @@ def create_model(params, adjacency, N_p):
     fhn_eps = float(params.get("fhn_eps", 0.08))
     alpha = float(params.get("alpha", 0.2))
     k = float(params.get("k", 0.25))
-    dt = float(params.get("dt", 0.01))
+    dt = get_stable_dt(params, adjacency)
     cr = float(params.get("cr", 1.0))
     a = float(params.get("a", 3.0))
     vrp = float(params.get("vrp", 1.5))

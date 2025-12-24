@@ -138,14 +138,14 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(
-        "paper_config_for_CS",
+        "test_optimal_dt",
         mode="time_series",
         quick_analyze_graph=False,
         parallel=True,
-        cr=0.4,
+        cr=0.8,
         total_time=100000,
         transitory_time=0,
         mean_poisson=0.7,
-        epsilon=[0.01, 0.05, 0.08, 0.1],
+        epsilon=4.0,
         std=0.9,
     )
