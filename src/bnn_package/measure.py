@@ -11,6 +11,7 @@ from tabulate import tabulate
 import time
 import entropy.entropy as ee
 from tqdm import tqdm
+from sklearn.cross_decomposition import CCA
 
 
 # ======================= Functions
@@ -184,7 +185,15 @@ def print_simulation_report(adj_matrix, fast_mode=False):
 
 
 def compute_te_over_lags(
-    x, y, lags, n_real=10, n_eff=4096, kNN=5, embedding=(2, 2), Theiler_correction=15
+    x,
+    y,
+    lags,
+    n_real=10,
+    n_eff=4096,
+    kNN=5,
+    embedding=(2, 2),
+    Theiler_correction=15,
+    verbose=True,
 ):
     """
     Computes TE over a range of lags with explicit Theiler correction.
@@ -192,8 +201,16 @@ def compute_te_over_lags(
     means = np.zeros(len(lags))
     stds = np.zeros(len(lags))
     ee.multithreading(do_what="auto")
-    print(f"Computing TE over {len(lags)} lags (Range: {lags[0]}-{lags[-1]})...")
-    for i, tau in enumerate(tqdm(lags)):
+    # print(f"Computing TE over {len(lags)} lags (Range: {lags[0]}-{lags[-1]})...")
+    if verbose:
+        ee.set_verbosity(1)
+        print(f"Computing TE over {len(lags)} lags (Range: {lags[0]}-{lags[-1]})...")
+        iterator = tqdm(lags)
+    else:
+        ee.set_verbosity(0)
+        iterator = lags
+
+    for i, tau in enumerate(iterator):
         current_lag_values = []
 
         # We loop manually to capture the STD (distribution) of the TE
@@ -207,10 +224,9 @@ def compute_te_over_lags(
                 lag=tau,
                 k=kNN,
                 N_eff=n_eff,
-                N_real=1,  # We handle realizations manually here for the std
+                N_real=1,
                 Theiler=Theiler_correction,
             )[0]
-
             current_lag_values.append(val)
 
         means[i] = np.mean(current_lag_values)
@@ -227,11 +243,52 @@ def kuramoto_order(X, Y, N, t):
     return np.abs(z)
 
 
+def compute_kl_divergence(p_vec, q_vec):
+    """Kullback-Leibler Divergence: D(P || Q)"""
+    # 1. Theoretical Correction: TE cannot be negative
+    # Negative values are estimator bias/noise when True TE approx 0.
+    # We clip them to 0 (plus epsilon for log stability).
+    p_vec = np.maximum(p_vec, 0.0)
+    q_vec = np.maximum(q_vec, 0.0)
+
+    # 2. Normalize to create valid probability distributions
+    p_sum = np.sum(p_vec)
+    q_sum = np.sum(q_vec)
+
+    # Handle empty/silent systems
+    if p_sum == 0 or q_sum == 0:
+        return 0.0
+
+    p = p_vec / p_sum
+    q = q_vec / q_sum
+
+    # 3. Compute KL with epsilon stability
+    # We add epsilon INSIDE the log to prevent log(0)
+    epsilon = 1e-15
+
+    # We use the mask approach to strictly follow 0*log(0) = 0 definition
+    # But (p+eps)/(q+eps) is a safe, fast approximation
+    return np.sum(p * np.log((p + epsilon) / (q + epsilon)))
+
+
+def compute_cca_score(p_vec, q_vec):
+    """Canonical Correlation Analysis (1D Approximation for samples)"""
+    cca = CCA(n_components=1)
+    X_c, Y_c = cca.fit_transform(p_vec.reshape(-1, 1), q_vec.reshape(-1, 1))
+    return np.corrcoef(X_c.T, Y_c.T)[0, 1]
+
+
 # --- THE REGISTRY ---
 
-AVAILABLE_METRICS = {
+AVAILABLE_METRICS_ORDER_PARAMETER = {
     "sync_error": Synchronized_error,
     "kuramoto": kuramoto_order,
     "mean standard deviation": MSD_vec_xy,
     # Add
+}
+
+
+RESEARCH_METRICS = {
+    "kl_divergence": compute_kl_divergence,
+    "cca_alignment": compute_cca_score,
 }

@@ -36,7 +36,8 @@ from .measure import (
     find_settling_time,
     print_simulation_report,
     compute_te_over_lags,
-    AVAILABLE_METRICS,  # Good to expose this registry
+    AVAILABLE_METRICS_ORDER_PARAMETER,
+    RESEARCH_METRICS,
 )
 
 __all__ = [
@@ -70,5 +71,6 @@ __all__ = [
     "find_settling_time",
     "print_simulation_report",
     "compute_te_over_lags",
-    "AVAILABLE_METRICS",
+    "AVAILABLE_METRICS_ORDER_PARAMETER",
+    "RESEARCH_METRICS",
 ]

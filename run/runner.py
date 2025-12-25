@@ -13,8 +13,12 @@ import uuid
 from tqdm import tqdm
 
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
-from bnn_package import save_result, load_config, corrupted_simulation  # noqa: F401
-from workers import run_order_parameter, time_series
+from bnn_package import (
+    save_result,
+    load_config,
+    corrupted_simulation,  # noqa: F401
+)
+from workers import run_order_parameter, time_series, research_alignment_worker
 
 
 # ======================= Functions
@@ -96,7 +100,13 @@ def main():
 
     # --- PREPARE TASKS ---
     mode = config.get("mode", "sweep")
-    target_function = time_series if mode == "time_series" else run_order_parameter
+    mode_map = {
+        "time_series": time_series,
+        "sweep": run_order_parameter,
+        "research_alignment": research_alignment_worker,
+    }
+
+    target_function = mode_map.get(mode, run_order_parameter)
 
     tasks, sweep_vars = generate_tasks(config)
 
@@ -149,6 +159,4 @@ def main():
 
 
 if __name__ == "__main__":
-    corrupted_simulation(
-        "Data_output/20251224-175714_test_optimal_dt/ts_N1000_Coup4.000_cr0.800_G-60409aeb.h5"
-    )
+    main()
