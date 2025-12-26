@@ -212,3 +212,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+run/Data_output/
+*.npz
+*.csv
+export

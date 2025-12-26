@@ -1,0 +1,24 @@
+mode: time_series
+output_file: results_paper_config_for_CS.csv
+parallel: true
+cores_ratio: 0.8
+output_folder: Data_output
+seed: 1234567890
+quick_analyze_graph: false
+number_of_nodes: 1000
+square_for_graph: [10.0, 10.0]
+diffusive_operator: Laplacian
+std: 0.25
+mean_poisson: 1
+total_time: 100000
+transitory_time: 0
+dt: 0.01
+alpha: 0.2
+a: 3.0
+k: 0.25
+vrp: 1.5
+fhn_eps: 0.08
+epsilon: [0.2, 0.4, 0.6, 0.8]
+metrics: [sync_error]
+cr: [0.6]
+existing_graph_path: Data_output/graphs_registry/graph_N1000_std0.25_fc3119bd.npz

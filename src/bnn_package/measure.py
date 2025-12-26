@@ -2,33 +2,18 @@
 
 # ======================= Libraries
 
+
 import numpy as np
 import numba
 from scipy.spatial.distance import pdist  # noqa: F401
 import networkx as nx
 from tabulate import tabulate
 import time
-from datetime import datetime
-from pathlib import Path
+#import entropy.entropy as ee
+from tqdm import tqdm
+
 
 # ======================= Functions
-
-
-def prepare_data(arr):
-    """
-    Prépare les données pour la lib C Entropy.
-    Règle 1 : Format (1, N_samples) obligatoire (donc 1 ligne, N colonnes).
-    Règle 2 : Mémoire contiguë (C-contiguous).
-    Règle 3 : Type float64 (double).
-    """
-    # Si c'est un vecteur plat (N,), on le passe en (1, N)
-    if arr.ndim == 1:
-        arr = arr.reshape(1, -1)
-    # Si c'est (N, 1), on transpose en (1, N)
-    elif arr.shape[0] > arr.shape[1]:
-        arr = arr.T
-
-    return np.ascontiguousarray(arr, dtype=np.float64)
 
 
 @numba.jit(nopython=True)
@@ -78,22 +63,6 @@ def find_settling_time(signal, final_n_samples, tolerance_percent=1):
     return settling_index, settling_index, (lower_bound, upper_bound)
 
 
-@numba.jit(nopython=True)
-def MSD_xy(G, X, Y):
-    """
-    Return the MSD for a given epsilon
-    """
-    n, N = X.shape
-    assert n == len(G), "wrong dimension"
-    MSD_values = np.zeros(N)
-    mean_X = np.mean(X, axis=0)
-    mean_Y = np.mean(Y, axis=0)
-    for t in range(N):
-        MSD_t = np.mean((X[:, t] - mean_X[t]) ** 2 + (Y[:, t] - mean_Y[t]) ** 2)
-        MSD_values[t] = MSD_t
-    return MSD_values
-
-
 def MSD_vec_xy(G, X, Y):
     """
     Return the MSD for a given epsilon
@@ -109,7 +78,7 @@ def MSD_vec_xy(G, X, Y):
     return MSD_values
 
 
-def MSD(G, X, average=True, axe=1):
+def MSD(G, X, order: str, average=True, axe=1):
     """
     Return the MSD in the order:
     -- axe=1: esperance_t(variance_node(t))
@@ -117,23 +86,19 @@ def MSD(G, X, average=True, axe=1):
     """
     (n, N) = np.shape(X)
     assert N == len(G), "wrong dimension"
-    msd_values = np.std(X, axis=axe)
-    if average:
-        return np.mean(msd_values)
+    if order == "right":
+        msd_values = np.std(X, axis=axe)
+        if average:
+            return np.mean(msd_values)
+        else:
+            return msd_values
+    elif order == "left":
+        msd_values = np.mean(X, axis=axe)
+        return np.std(msd_values)
     else:
-        return msd_values
-
-
-def MSD_inverse(G, X, axe=0):
-    """
-    Return the MSD in the order:
-    -- axe=1: esperance_t(variance_node(t))
-    -- axe=0: esperance_node(variance_t(node))
-    """
-    n, N = X.shape
-    assert N == len(G), "wrong dimension"
-    MSD_values = np.mean(X, axis=axe)
-    return np.std(MSD_values)
+        raise ValueError(
+            f"the way to compute MSD is either 'right' for std+mean or 'left' for mean+std but {order} was given"
+        )
 
 
 @numba.jit(nopython=True)
@@ -148,11 +113,7 @@ def Synchronized_error(X, Y, N_nodes, time):  # not easily vectorizable
     return 2 * error / N_nodes / (N_nodes - 1)
 
 
-def Synchronized_error_mean():
-    return 4
-
-
-def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
+def print_simulation_report(adj_matrix, fast_mode=False):
     """
     Computes graph topology metrics and prints a table to the console.
 
@@ -199,7 +160,6 @@ def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
     # We create a list of lists
     table_data = [
         ["Metric", "Value", "Description"],
-        ["Simulation ID", sim_name, "Run Identifier"],
         ["Edges (E)", int(num_edges), "Total Connections"],
         ["Avg Degree (<k>)", f"{avg_degree:.4f}", "Avg neighbors per node"],
         ["Density", f"{density:.4f}", "Actual/Possible edges"],
@@ -212,7 +172,9 @@ def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
 
     # 6. Print using 'fancy_grid' for that scientific look
     print("\n" + "=" * 60)
-    print(f">>> SIMULATION INITIALIZATION LOG [{time.strftime('%H:%M:%S')}]")
+    print(
+        f">>> GRAPH ACTIVE NODES ONLY TOPOLOGY ANALYSIS LOG [{time.strftime('%H:%M:%S')}]"
+    )
     print("=" * 60)
     print(tabulate(table_data, headers="firstrow", tablefmt="fancy_grid"))
 
@@ -220,47 +182,158 @@ def print_simulation_report(adj_matrix, sim_name="Sim_001", fast_mode=False):
     print(f"\n[System] Topology analysis completed in {t_end - t_start:.3f}s")
     print("=" * 60 + "\n")
 
-def get_simulation_path(base_folder, sim_name, parameters=None):
+
+def compute_te_over_lags(
+    x, y, lags, n_real=10, n_eff=4096, kNN=5, embedding=(2, 2), Theiler_correction=15
+):
     """
-    Generates a valid path and ensures the folder exists.
-    
-    Args:
-        base_folder (str): e.g., "results" or "/home/user/data"
-        sim_name (str): General prefix, e.g., "FHN_Run"
-        parameters (dict): Optional. Adds param values to filename for easy searching.
-    
-    Returns:
-        Path: A full Path object ready for h5py
+    Computes TE over a range of lags with explicit Theiler correction.
     """
-    # 1. Define the Output Directory
-    # We use Path() so this works on Windows and Linux automatically
-    # We add a date subfolder to keep things organized
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    output_dir = Path(base_folder) / date_str
+    means = np.zeros(len(lags))
+    stds = np.zeros(len(lags))
+    ee.multithreading(do_what="auto")
+    print(f"Computing TE over {len(lags)} lags (Range: {lags[0]}-{lags[-1]})...")
+    for i, tau in enumerate(tqdm(lags)):
+        current_lag_values = []
+
+        # We loop manually to capture the STD (distribution) of the TE
+        for _ in range(n_real):
+            val = ee.compute_TE(
+                x,
+                y,
+                n_embed_x=embedding[0],
+                n_embed_y=embedding[1],
+                stride=1,
+                lag=tau,
+                k=kNN,
+                N_eff=n_eff,
+                N_real=1,  # We handle realizations manually here for the std
+                Theiler=Theiler_correction,
+            )[0]
+
+            current_lag_values.append(val)
+
+        means[i] = np.mean(current_lag_values)
+        stds[i] = np.std(current_lag_values)
+
+    return means, stds
+
+
+def kuramoto_order(X, Y, N, t):
+    """Example: Kuramoto Order Parameter (Phase coherence)"""
+    # Assuming X is phase or can be converted to phase
+    phases = np.arctan2(Y, X)
+    z = np.mean(np.exp(1j * phases))
+    return np.abs(z)
+
+
+# ------- The order parameters -------------
+
+def detect_oscillating_nodes(X, params, min_power=1.0e8, f_min=0.01):
+    """
+    Détection d'oscillations via FFT (Fast Fourier Transform).
     
-    # 2. Create the directory if it doesn't exist
-    # parents=True allows creating "results/2023-10-27" in one go
-    # exist_ok=True prevents error if folder already exists
-    output_dir.mkdir(parents=True, exist_ok=True)
+    Arguments:
+    ----------
+    X : array (n_time, n_nodes)
+        Séries temporelles des potentiels.
+    params : dict
+        Doit contenir "dt".
+    min_power : float
+        Puissance spectrale minimale pour considérer que le noeud oscille.
+        Remplace 'amp_min'. À ajuster selon l'échelle de tes données.
+    f_min : float
+        Fréquence minimale ignorée (pour éviter le bruit basse fréquence/dérive).
+        
+    Retourne:
+    ---------
+    is_osc : bool array (n_nodes,)
+    freq   : float array (n_nodes,) - Fréquence dominante en Hz
+    """
+    n_time, n_nodes = X.shape
+    dt = params["dt"]
     
-    # 3. Construct the Filename
-    # Start with a Timestamp for uniqueness
-    time_str = datetime.now().strftime("%H-%M-%S")
-    filename = f"{sim_name}_{time_str}"
+    X_centered = X - np.mean(X, axis=0)
+
+
+    fft_spectrum = np.fft.rfft(X_centered, axis=0)
     
-    # Optional: Append key parameters to filename (e.g., "Sim_12-00-00_eps0.1.h5")
-    if parameters:
-        # Filter for crucial params to keep filename short
-        if 'epsilon' in parameters:
-            filename += f"_eps{parameters['epsilon']:.2f}"
-        if 'alpha' in parameters:
-            filename += f"_a{parameters['alpha']:.2f}"
-        if 'time_length_simulation' in parameters:
-            filename += f"_finaltime{parameters['time_length_simulation']:.2f}"
-        if 'number of nodes' in parameters:
-            filename += f"_nodes{parameters['number of nodes']:.2f}"
-            
-    filename += ".h5"
+    # 3. Calculer le spectre de puissance (Power Spectrum)
+    power_spectrum = np.abs(fft_spectrum)**2
     
-    # 4. Join folder and filename
-    return output_dir / filename
+    # 4. Obtenir les fréquences correspondantes aux indices de la FFT
+    freqs = np.fft.rfftfreq(n_time, d=dt)
+    
+    # --- FILTRAGE DES BASSES FRÉQUENCES ---
+    # On ignore les fréquences très basses (drift lent)
+    valid_idx = freqs >= f_min
+    
+
+    restricted_power = power_spectrum[valid_idx, :]
+    restricted_freqs = freqs[valid_idx]
+    
+    if restricted_power.shape[0] == 0:
+        # Cas extrême où tout est sous f_min
+        return np.zeros(n_nodes, dtype=bool), np.zeros(n_nodes)
+
+    # 5. Trouver le pic (fréquence dominante) pour chaque noeud
+    # argmax retourne l'indice du pic dans la dimension restreinte
+    peak_indices = np.argmax(restricted_power, axis=0)
+    
+    # Récupérer la puissance max et la fréquence correspondante
+    max_powers = restricted_power[peak_indices, np.arange(n_nodes)]
+    peak_freqs = restricted_freqs[peak_indices]
+    
+    # 6. Décision : Oscillant ou Bruit ?
+    # Si le pic de puissance est trop faible, c'est juste du bruit de fond
+    is_osc = max_powers > min_power
+    
+    # Mettre à NaN ou 0 les fréquences des non-oscillants
+    final_freqs = peak_freqs.copy()
+    final_freqs[~is_osc] = np.nan
+    
+    return is_osc, final_freqs
+
+def COH(Trajectory, params):
+    threshold = params.get("threshold", 0.0)  # par ex. 0.0 comme défaut
+    frac_active = (Trajectory >= threshold).mean(axis=1)   # (n_time,)
+    F = np.percentile(frac_active, 95.0)  # max sur le temps de la fraction de neurones "actifs"
+    return float(F)
+
+def OSC(Trajectory, params):
+    dt = params["dt"]
+    is_osc, _ = detect_oscillating_nodes(Trajectory, params)
+    osc_fraction = np.mean(is_osc) 
+    return osc_fraction
+
+def FMSD(Trajectory, params):
+    # 1. Récupérer paramètres temporels
+
+    dt = params["dt"]
+    
+
+
+    # 3. Détection
+    is_osc, freq = detect_oscillating_nodes(Trajectory, params)
+
+    # Sécurité si rien n'oscille
+    if not np.any(is_osc):
+        return 0.0
+
+    freq_use = freq[is_osc]       
+    sigma_nu = np.std(freq_use)
+
+
+        
+    return sigma_nu
+
+
+
+
+# --- THE REGISTRY ---
+
+AVAILABLE_METRICS = {
+    "COH": COH,
+    "OSC": OSC,
+    "FMSD": FMSD,
+}
