@@ -12,6 +12,20 @@ import shutil
 import uuid
 from tqdm import tqdm
 
+# PREVENT OVERSUBSCRIPTION (The "Performance Killer")
+# Since we run N parallel workers (where N = num_cores), each worker
+# must be single-threaded to avoid 100 threads fighting for 10 cores.
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
+# FIX SEMAPHORE LEAK (Sklearn/Joblib)
+# Prevents sklearn from trying to spawn a nested pool inside our pool.
+os.environ["LOKY_MAX_CPU_COUNT"] = "1"
+os.environ["JOBLIB_MULTIPROCESSING"] = "0"
+
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
 from bnn_package import (
     save_result,

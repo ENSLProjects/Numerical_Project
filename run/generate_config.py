@@ -149,15 +149,29 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(
-        "test_relationship",
+        "scan_eps",
         mode="research_alignment",
         quick_analyze_graph=False,
         parallel=True,
-        cr=[0.1, 1],
+        cores_ratio=0.5,
+        cr=0.5,
         total_time=100000,
-        transitory_time=0,
+        transitory_time=1000,
         mean_poisson=0.7,
-        epsilon=[0.08, 1.5],
+        epsilon=[0.011, 0.012, 0.0125, 0.013],
         std=0.9,
+        research_analysis={
+            "active": True,
+            # Minimal lags to find the minimum quickly
+            "te_lags": [1, 5, 10],
+            # Fast/Coarse settings
+            "n_real": 10,
+            "n_eff": 4096,
+            "kNN": 3,
+            # Light sampling (200 pairs per distance)
+            "stratified_sampling": {"n_dist1": 200, "n_dist2": 200, "n_dist3": 200},
+            # We only need KL to find the "Goldilocks Zone"
+            "metrics": ["kl_divergence", "cca_alignment"],
+        },
         existing_graph_path="Data_output/graphs_registry/graph_N1000_std0.9_c267b0d5.npz",
     )

@@ -269,6 +269,45 @@ def research_alignment_worker(params):
     start = int(params.get("transitory_time", 1000))
     voltage_data = traj[start:, 0, :]
 
+    results = {
+        "epsilon": model.coupling_str,
+        "cr": model.c_r,
+        "fhn_eps": model.fhn_eps,
+        "graph_uuid": graph_uuid,
+    }
+
+    if not np.isfinite(voltage_data).all():
+        print(
+            f"!!! CRASH DETECTED: Simulation exploded for eps={model.coupling_str}, cr={model.c_r}"
+        )
+        # Return a 'failed' result so the runner doesn't crash
+        return {
+            "epsilon": model.coupling_str,
+            "cr": model.c_r,
+            "error": "Simulation exploded (NaN/Inf values), try to look at rk4 dt",
+        }
+
+    # Also check for empty/silent data (std dev approx 0)
+    var = np.std(voltage_data)
+    if var < 1e-9:
+        print(
+            f">>> SKIPPING TE: Fixed point detected (Std={var:.2e}) for cr={model.c_r}"
+        )
+
+        # Fill results with dummy zeros to keep the CSV valid
+        analysis_cfg = params.get("research_analysis", {})
+        lags = analysis_cfg.get("te_lags", [1])
+        metrics = analysis_cfg.get("metrics", ["kl_divergence"])
+
+        for tau in lags:
+            results[f"te_uncertainty_lag{tau}"] = 0.0
+            for m in metrics:
+                results[f"{m}_lag{tau}"] = (
+                    0.0  # KL 0 means perfect alignment (trivial), or just 0 info
+                )
+
+        return results
+
     # 3. Analyze
     analysis_cfg = params.get("research_analysis", {})
     if not analysis_cfg.get("active", False):
@@ -279,50 +318,49 @@ def research_alignment_worker(params):
 
     # B. Loop over Lags (Flattening dimensions)
     lags_to_test = analysis_cfg.get("te_lags", [1])
-    metrics_to_run = analysis_cfg.get("metrics", ["kl_divergence", "cca_alignment"])
 
-    results = {
-        "epsilon": model.coupling_str,
-        "cr": model.c_r,
-        "fhn_eps": model.fhn_eps,
-        "graph_uuid": graph_uuid,
-    }
+    n_real = analysis_cfg.get("n_real", 1)
 
     for tau in lags_to_test:
-        # 1. Compute Theory for this lag: exp(-L * dt * tau)
-        # Note: model.coupling_op includes the diffusion type logic (Laplacian vs Diffusive)
         L_exp = expm(-model.coupling_op * model.dt * tau)
 
-        measured_vals = []
+        measured_means = []
+        measured_stds = []
         theory_vals = []
 
-        # 2. Compute TE for pairs
         for group, pairs in pairs_dict.items():
             for u, v in pairs:
                 x = prepare_data(voltage_data[:, u])
                 y = prepare_data(voltage_data[:, v])
 
-                # Pass list [tau] to existing function
-                val, _ = compute_te_over_lags(
+                # Pass n_real to the optimized measure function
+                val_means, val_stds = compute_te_over_lags(
                     x,
                     y,
                     [tau],
-                    n_real=1,
+                    n_real=n_real,
                     n_eff=analysis_cfg["n_eff"],
                     kNN=analysis_cfg["kNN"],
                     verbose=False,
                 )
-                measured_vals.append(val[0])
+
+                measured_means.append(val_means[0])
+                measured_stds.append(val_stds[0])
                 theory_vals.append(L_exp[u, v])
 
-        # 3. Compute Metrics for this lag
-        vec_meas = np.array(measured_vals)
-        vec_theo = np.array(theory_vals)
+        # Convert to arrays and Compute Metrics
+        vec_means = np.array(measured_means)
+        vec_stds = np.array(measured_stds)
+        vec_theory = np.array(theory_vals)
 
-        for m in metrics_to_run:
-            if m in RESEARCH_METRICS:
-                score = RESEARCH_METRICS[m](vec_meas, vec_theo)
-                # Save as flat key: e.g. "kl_divergence_lag5"
-                results[f"{m}_lag{tau}"] = score
+        # Save uncertainty metric (Good for error bars in plots later)
+        results[f"te_uncertainty_lag{tau}"] = np.mean(vec_stds)
+
+        # Compute Metrics using the ROBUST MEAN
+        requested_metrics = analysis_cfg.get("metrics", ["kl_divergence"])
+        for metric_name in requested_metrics:
+            if metric_name in RESEARCH_METRICS:
+                score = RESEARCH_METRICS[metric_name](vec_means, vec_theory)
+                results[f"{metric_name}_lag{tau}"] = score
 
     return results

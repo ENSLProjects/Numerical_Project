@@ -10,6 +10,10 @@ import matplotlib.animation as animation
 from pathlib import Path
 from scipy.spatial import KDTree
 from bnn_package import load_simulation_data, prepare_data, compute_te_over_lags
+import sys
+import os
+import re
+import pandas as pd
 
 
 # ======================= Functions
@@ -524,7 +528,139 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
     return ani
 
 
+def parse_columns(df):
+    """
+    Extracts metrics and lags from column names.
+    Returns: dict { 'metric_name': { lag: column_name } }
+    """
+    metrics = {}
+
+    # Regex to match "metric_name_lag123"
+    pattern = re.compile(r"(.+)_lag(\d+)$")
+
+    for col in df.columns:
+        match = pattern.match(col)
+        if match:
+            name = match.group(1)
+            lag = int(match.group(2))
+
+            if name not in metrics:
+                metrics[name] = {}
+            metrics[name][lag] = col
+
+    return metrics
+
+
+def plot_phase_scan(df, metrics_map, output_prefix):
+    """
+    Plots Metric vs Epsilon (The 'U-Shape' finder).
+    """
+    print(">>> Detected PHASE SCAN mode (Multiple Epsilons).")
+
+    # Sort by epsilon for clean lines
+    df = df.sort_values(by="epsilon")
+
+    for metric_name, lag_dict in metrics_map.items():
+        plt.figure(figsize=(10, 6))
+
+        # Plot a line for each Lag available
+        sorted_lags = sorted(lag_dict.keys())
+        for lag in sorted_lags:
+            col = lag_dict[lag]
+            plt.plot(df["epsilon"], df[col], marker="o", label=f"Lag {lag}")
+
+        plt.xscale("log")
+        plt.xlabel(r"Coupling Strength $\epsilon$")
+        plt.ylabel(metric_name.replace("_", " ").title())
+        plt.title(f"Phase Scan: {metric_name} vs Coupling")
+        plt.grid(True, which="both", linestyle="--", alpha=0.5)
+        plt.legend()
+
+        outfile = f"{output_prefix}_{metric_name}_scan.png"
+        plt.savefig(outfile, dpi=300)
+        print(f"Saved: {outfile}")
+        plt.close()
+
+
+def plot_time_evolution(df, metrics_map, output_prefix):
+    """
+    Plots Metric vs Lag (The 'Final Proof' time evolution).
+    """
+    print(">>> Detected TIME EVOLUTION mode (Single/Few Epsilons).")
+
+    # If multiple rows exist (e.g. multiple epsilons), we plot one line per row
+    for idx, row in df.iterrows():
+        eps = row.get("epsilon", "unknown")
+
+        # Create one plot per metric (KL, CCA, MSE)
+        for metric_name, lag_dict in metrics_map.items():
+            lags = sorted(lag_dict.keys())
+            values = [row[lag_dict[lag]] for lag in lags]
+
+            plt.figure(figsize=(10, 6))
+
+            # Main Line
+            plt.plot(
+                lags,
+                values,
+                "o-",
+                linewidth=2,
+                color="crimson",
+                label=rf"$\epsilon={eps}$",
+            )
+
+            # Theoretical embellishments for specific metrics
+            if "cca" in metric_name.lower():
+                plt.axhline(
+                    1.0, color="black", linestyle="--", label="Perfect Alignment"
+                )
+                plt.ylim(0, 1.1)
+            elif "kl" in metric_name.lower():
+                plt.axhline(0.0, color="black", linestyle="--", label="Zero Divergence")
+
+            plt.xlabel("Lag $\\tau$ (Time Steps)")
+            plt.ylabel(metric_name.replace("_", " ").title())
+            plt.title(rf"Structural-Functional Alignment over Time\n($\epsilon={eps}$)")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+
+            outfile = f"{output_prefix}_{metric_name}_eps{eps}_evolution.png"
+            plt.savefig(outfile, dpi=300)
+            print(f"Saved: {outfile}")
+            plt.close()
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python plot_results.py <path_to_results.csv>")
+        sys.exit(1)
+
+    csv_path = sys.argv[1]
+    if not os.path.exists(csv_path):
+        print(f"Error: File {csv_path} not found.")
+        sys.exit(1)
+
+    df = pd.read_csv(csv_path)
+    print(f"Loaded {len(df)} rows from {csv_path}")
+
+    # 1. Parse Columns to find what data we have
+    metrics_map = parse_columns(df)
+    if not metrics_map:
+        print("Error: No 'metric_lagX' columns found in CSV.")
+        return
+
+    # 2. Determine Plot Mode
+    # If we have many epsilon points (>3), it's likely a sweep.
+    # If we have 1 or 2 epsilons, it's likely a proof run.
+    unique_eps = df["epsilon"].nunique() if "epsilon" in df.columns else 0
+
+    output_prefix = os.path.splitext(csv_path)[0]
+
+    if unique_eps > 3:
+        plot_phase_scan(df, metrics_map, output_prefix)
+    else:
+        plot_time_evolution(df, metrics_map, output_prefix)
+
+
 if __name__ == "__main__":
-    animate_with_tracer(
-        "Data_output/20251224-175714_test_optimal_dt/ts_N1000_Coup4.000_cr0.800_G-60409aeb.h5"
-    )
+    main()
