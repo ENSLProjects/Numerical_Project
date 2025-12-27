@@ -188,6 +188,7 @@ def compute_te_over_lags(
     x,
     y,
     lags,
+    epsilon_noise=1e-8,
     n_real=10,
     n_eff=4096,
     kNN=5,
@@ -207,36 +208,22 @@ def compute_te_over_lags(
         return means, stds
 
     rng = np.random.default_rng()
-    epsilon_noise = 1e-8
 
-    # Add noise BEFORE reordering
+    # Add noise BEFORE reordering to prevend the TE being strictly zero
     x_noisy = x + epsilon_noise * rng.standard_normal(x.shape)
     y_noisy = y + epsilon_noise * rng.standard_normal(y.shape)
 
     x_c = np.ascontiguousarray(x_noisy, dtype=np.float64)
     y_c = np.ascontiguousarray(y_noisy, dtype=np.float64)
 
-    # Configure C-library verbosity
     ee.set_verbosity(1 if verbose else 0)
 
     iterator = tqdm(lags) if verbose else lags
 
     for i, tau in enumerate(iterator):
-        # --- 3. MANUAL PYTHON LOOP FOR N_REAL ---
         # The C-library's internal N_real can be unstable on some architectures.
-        # We do it manually to ensure robustness.
-
         realizations = []
-
-        # Run standard calculation multiple times (library handles internal shuffling/subsampling via N_eff)
-        # Note: If n_real=1, we just run it once.
-        # To get proper stats, we rely on the library's N_real=1 return if we trust it,
-        # OR we call it multiple times if we want our own bootstrap.
-
-        # ACTUALLY: The C-library's N_real=1 returns a single value.
         # To get a mean/std, we need to ask the library for N_real > 1 OR loop here.
-        # Since the user requested the Python loop approach:
-
         for _ in range(max(1, n_real)):
             val = ee.compute_TE(
                 x_c,
@@ -255,7 +242,6 @@ def compute_te_over_lags(
                 realizations.append(val[0])
             else:
                 realizations.append(val)
-
         # Compute Stats manually
         if n_real > 1:
             means[i] = np.mean(realizations)
@@ -263,7 +249,6 @@ def compute_te_over_lags(
         else:
             means[i] = realizations[0]
             stds[i] = 0.0
-
     return means, stds
 
 
@@ -277,13 +262,12 @@ def kuramoto_order(X, Y, N, t):
 
 def compute_kl_divergence(p_vec, q_vec):
     """Kullback-Leibler Divergence: D(P || Q)"""
-    # 1. Theoretical Correction: TE cannot be negative
+    # Theoretical Correction: TE cannot be negative
     # Negative values are estimator bias/noise when True TE approx 0.
     # We clip them to 0 (plus epsilon for log stability).
     p_vec = np.maximum(p_vec, 0.0)
     q_vec = np.maximum(q_vec, 0.0)
 
-    # 2. Normalize to create valid probability distributions
     p_sum = np.sum(p_vec)
     q_sum = np.sum(q_vec)
 
@@ -298,8 +282,6 @@ def compute_kl_divergence(p_vec, q_vec):
     # We add epsilon INSIDE the log to prevent log(0)
     epsilon = 1e-15
 
-    # We use the mask approach to strictly follow 0*log(0) = 0 definition
-    # But (p+eps)/(q+eps) is a safe, fast approximation
     return np.sum(p * np.log((p + epsilon) / (q + epsilon)))
 
 

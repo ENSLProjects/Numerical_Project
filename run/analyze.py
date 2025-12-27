@@ -611,10 +611,11 @@ def plot_time_evolution(df, metrics_map, output_prefix):
 
             # Theoretical embellishments for specific metrics
             if "cca" in metric_name.lower():
-                plt.axhline(
-                    1.0, color="black", linestyle="--", label="Perfect Alignment"
-                )
-                plt.ylim(0, 1.1)
+                # plt.axhline(
+                #    1.0, color="black", linestyle="--", label="Perfect Alignment"
+                # )
+                # plt.ylim(0, 1.1)
+                pass
             elif "kl" in metric_name.lower():
                 plt.axhline(0.0, color="black", linestyle="--", label="Zero Divergence")
 
