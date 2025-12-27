@@ -149,27 +149,27 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(
-        "scan_eps",
+        "simulation_optimal_linear_cr_epsilon",
         mode="research_alignment",
         quick_analyze_graph=False,
         parallel=True,
         cores_ratio=0.5,
-        cr=0.5,
+        cr=0.495,
         total_time=100000,
         transitory_time=1000,
         mean_poisson=0.7,
-        epsilon=[0.011, 0.012, 0.0125, 0.013],
+        epsilon=0.012,
         std=0.9,
         research_analysis={
             "active": True,
             # Minimal lags to find the minimum quickly
-            "te_lags": [1, 5, 10],
+            "te_lags": [1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50, 100, 200, 500],
             # Fast/Coarse settings
-            "n_real": 10,
+            "n_real": 50,
             "n_eff": 4096,
-            "kNN": 3,
+            "kNN": 5,
             # Light sampling (200 pairs per distance)
-            "stratified_sampling": {"n_dist1": 200, "n_dist2": 200, "n_dist3": 200},
+            "stratified_sampling": {"n_dist1": 2000, "n_dist2": 2000, "n_dist3": 2000},
             # We only need KL to find the "Goldilocks Zone"
             "metrics": ["kl_divergence", "cca_alignment"],
         },

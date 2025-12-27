@@ -3,36 +3,63 @@
 # ======================= Libraries
 
 
-import itertools
-import multiprocessing
 import os
+import yaml
 import sys
-import time
-import shutil
-import uuid
-from tqdm import tqdm
 
-# PREVENT OVERSUBSCRIPTION (The "Performance Killer")
-# Since we run N parallel workers (where N = num_cores), each worker
-# must be single-threaded to avoid 100 threads fighting for 10 cores.
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-os.environ["OPENBLAS_NUM_THREADS"] = "1"
-os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-os.environ["NUMEXPR_NUM_THREADS"] = "1"
 
-# FIX SEMAPHORE LEAK (Sklearn/Joblib)
-# Prevents sklearn from trying to spawn a nested pool inside our pool.
-os.environ["LOKY_MAX_CPU_COUNT"] = "1"
-os.environ["JOBLIB_MULTIPROCESSING"] = "0"
+# ======================= ADAPTIVE ENVIRONMENT CONFIGURATION =======================
+# We must detect the 'parallel' flag and set env vars BEFORE importing numpy/bnn_package.
 
+# Detect Parallel Mode from Config
+# We do this early to set environment variables before 'numpy' loads.
+config_path_env = "run/configs/config_phase_scan.yaml"
+if len(sys.argv) > 1:
+    config_path_env = sys.argv[1]
+
+use_parallel_env = False
+if os.path.exists(config_path_env):
+    try:
+        with open(config_path_env, "r") as f:
+            # Quick parse to avoid full load overhead in workers
+            cfg_env = yaml.safe_load(f)
+            use_parallel_env = cfg_env.get("parallel", False)
+    except Exception:
+        pass
+
+# Apply Environment Optimizations
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
-from bnn_package import (
+
+if use_parallel_env:
+    # OPTIMIZATION: Force single-threaded algebra for parallel workers
+    # This prevents 100 threads fighting for 6 cores.
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    # FIX: Prevent sklearn from spawning nested pools
+    os.environ["LOKY_MAX_CPU_COUNT"] = "1"
+    os.environ["JOBLIB_MULTIPROCESSING"] = "0"
+else:
+    # SEQUENTIAL MODE: Allow MKL/BLAS to use all cores
+    # We do not set the variables, letting libraries auto-detect max cores.
+    pass
+
+# it is fair to import now but Ruff is complaining with the PEP8 rule to import before calling
+
+import itertools  # noqa: E402
+import multiprocessing  # noqa: E402
+import time  # noqa: E402
+import shutil  # noqa: E402
+import uuid  # noqa: E402
+from tqdm import tqdm  # noqa: E402
+from bnn_package import (  # noqa: E402
     save_result,
     load_config,
     corrupted_simulation,  # noqa: F401
 )
-from workers import run_order_parameter, time_series, research_alignment_worker
+from workers import run_order_parameter, time_series, research_alignment_worker  # noqa: E402
 
 
 # ======================= Functions
