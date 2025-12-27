@@ -7,7 +7,6 @@ import networkx as nx
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-import matplotlib.colors as mcolors
 from pathlib import Path
 from scipy.spatial import KDTree
 from bnn_package import load_simulation_data, prepare_data, compute_te_over_lags
@@ -403,7 +402,6 @@ def animate_simulation(file_path, fps=30, steps_per_second=2000):
         vmax=v_max,
     )
 
-
     plt.colorbar(scatter, label="Active Voltage ($V_e$)")
     ax.set_aspect("equal")
     ax.axis("off")
@@ -431,16 +429,22 @@ def animate_simulation(file_path, fps=30, steps_per_second=2000):
 
 
 def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
-    # 1. Load Data (inchangé)
+    """
+    Advanced animation with a clickable node tracer.
+    """
+    # 1. Load Data
     data = load_simulation_data(file_path, graph=True, load_trajectory=True)
-    trajectory = data["trajectory"]
+    trajectory = data["trajectory"]  # Shape: (Time, Variables, Nodes)
     pos = data["graph"]["positions"]
     params = data["parameters"]
 
     if pos.shape[0] == 2:
         pos = pos.T
 
-    # 2. Timing and Slicing (inchangé)
+    # Pre-build a KDTree for lightning-fast click detection
+    tree = KDTree(pos)
+
+    # 2. Timing and Slicing
     dt = float(params.get("dt", 0.01))
     step_skip = max(1, int(steps_per_second / fps))
     voltages = trajectory[::step_skip, 0, :]
@@ -448,65 +452,50 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
 
     v_min, v_max = np.min(voltages), np.max(voltages)
 
-    # 3. Setup Figure avec colorbar partagée
-    fig = plt.figure(figsize=(16, 7))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1], wspace=0.3)
+    # 3. Setup Figure (2 Columns: Animation | Time Series)
+    fig = plt.figure(figsize=(15, 7))
+    ax_sim = fig.add_subplot(121)
+    ax_trace = fig.add_subplot(122)
 
-    ax_sim = fig.add_subplot(gs[0])
-    ax_trace = fig.add_subplot(gs[1])
-
-    # Animation Plot avec colormap "plasma"
+    # Animation Plot
     scatter = ax_sim.scatter(
         pos[:, 0],
         pos[:, 1],
         c=voltages[0, :],
-        cmap='viridis',  # Meilleur pour les contrastes forts
-        s=60,
-        edgecolors="white",
-        linewidths=0.3,
+        cmap="magma",
+        s=40,
+        edgecolors="black",
+        linewidths=0.2,
         vmin=v_min,
         vmax=v_max,
     )
-
-    # Ajout de la colorbar pour l'animation
-    cbar = fig.colorbar(scatter, ax=ax_sim, shrink=0.8, label="Voltage ($V_e$)")
-    cbar.ax.tick_params(labelsize=10)
-
     ax_sim.set_aspect("equal")
     ax_sim.axis("off")
-    title = ax_sim.set_title("Click a Node to Trace", fontsize=12, pad=20)
+    title = ax_sim.set_title("Click a node to trace")
 
-   
+    # Trace Plot (Initialize with Node 0)
     current_node = 0
     (line,) = ax_trace.plot(
-        full_time_axis,
-        trajectory[:, 0, current_node],
-        color="#1f77b4",  # Bleu clair pour la ligne
-        lw=2,
-        label=f"Node {current_node}",
+        full_time_axis, trajectory[:, 0, current_node], color="crimson", lw=1.5
     )
-    time_marker = ax_trace.axvline(
-        0, color="#d62728", linestyle="--", alpha=0.7, label="Current Time"
-    )  # Rouge pour le marqueur
-    ax_trace.set_title(f"Voltage Trace: Node {current_node}", fontsize=12)
-    ax_trace.set_xlabel("Time (s)", fontsize=10)
-    ax_trace.set_ylabel("Voltage ($V_e$)", fontsize=10)
-    ax_trace.grid(True, alpha=0.3, linestyle="--")
+    time_marker = ax_trace.axvline(0, color="black", linestyle="--", alpha=0.5)
+    ax_trace.set_title(f"Voltage Trace: Node {current_node}")
+    ax_trace.set_xlabel("Time (s)")
+    ax_trace.set_ylabel("Voltage ($V_e$)")
+    ax_trace.grid(True, alpha=0.3)
     ax_trace.set_ylim(v_min - 0.1, v_max + 0.1)
-    ax_trace.legend(fontsize=9)
 
-
-
-    
-
-    # 4. Interactive Click Logic (inchangé)
-    tree = KDTree(pos)
+    # 4. Interactive Click Logic
     def on_click(event):
         nonlocal current_node
         if event.inaxes != ax_sim:
             return
+
+        # Find nearest node to the click
         dists, idx = tree.query([event.xdata, event.ydata])
         current_node = idx
+
+        # Update the line data for the new node
         line.set_ydata(trajectory[:, 0, current_node])
         ax_trace.set_title(f"Voltage Trace: Node {current_node}")
         fig.canvas.draw_idle()
@@ -515,13 +504,17 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
 
     # 5. Animation Update
     def update(frame):
+        # Update spatial colors
         scatter.set_array(voltages[frame, :])
+
+        # Update time marker in the trace plot
         current_time = frame * step_skip * dt
         time_marker.set_xdata([current_time])
+
         title.set_text(f"Time: {current_time:.2f}s | Node: {current_node}")
         return scatter, time_marker, title
 
-    # 6. Run Animation
+    # 6. Run
     ani = animation.FuncAnimation(
         fig, update, frames=voltages.shape[0], interval=int(1000 / fps), blit=False
     )
@@ -530,161 +523,8 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
     plt.show()
     return ani
 
-def plot_interactive_fft(file_path, min_power=100.0, f_min=0.01):
-    """
-    Visualisation interactive de la FFT.
-    - Gauche: Carte des fréquences du réseau.
-    - Droite: Spectre de puissance du noeud sélectionné.
-    
-    Respecte scrupuleusement la logique de 'detect_oscillating_nodes'.
-    """
-    
-    # --- 1. CHARGEMENT ET PRÉPARATION ---
-    data = load_simulation_data(file_path, graph=True, load_trajectory=True)
-    trajectory = data["trajectory"]  # shape (n_time, n_vars, n_nodes)
-    pos = data["graph"]["positions"]
-    params = data["parameters"]
-    dt = float(params.get("dt", 0.01))
-
-    # On ne s'intéresse qu'à la première variable (ex: Voltage)
-    X = trajectory[:, 0, :] 
-    n_time, n_nodes = X.shape
-
-    # Correction dimension positions
-    if pos.shape[0] == 2:
-        pos = pos.T
-
-    # --- 2. PRE-CALCUL GLOBAL (Pour colorer le graphe) ---
-    # On utilise exactement ta logique pour calculer les fréquences globales
-    print("Calcul des fréquences globales...")
-    X_centered = X - np.mean(X, axis=0)
-    fft_vals = np.abs(np.fft.rfft(X_centered, axis=0))**2
-    freqs_axis = np.fft.rfftfreq(n_time, d=dt)
-    
-    # Filtrage f_min
-    valid_idx = freqs_axis >= f_min
-    restricted_power = fft_vals[valid_idx, :]
-    restricted_freqs = freqs_axis[valid_idx]
-    
-    # Pics
-    peak_indices = np.argmax(restricted_power, axis=0)
-    max_powers = restricted_power[peak_indices, np.arange(n_nodes)]
-    peak_freqs = restricted_freqs[peak_indices]
-    
-    # Masque oscillant
-    is_osc = max_powers > min_power
-    
-    # Couleurs des noeuds : NaN (Gris) si pas osc, sinon fréquence
-    node_colors = np.full(n_nodes, np.nan)
-    node_colors[is_osc] = peak_freqs[is_osc]
-
-    # --- 3. MISE EN PLACE DE LA FIGURE ---
-    fig = plt.figure(figsize=(16, 7))
-    gs = fig.add_gridspec(1, 2, width_ratios=[1, 1.2], wspace=0.2)
-    
-    ax_graph = fig.add_subplot(gs[0])
-    ax_fft = fig.add_subplot(gs[1])
-
-    # --- GRAPHE (PANNEAU DE GAUCHE) ---
-    # On utilise une colormap 'plasma' pour les fréquences, et gris pour le bruit
-    cmap = plt.cm.plasma
-    cmap.set_bad(color='lightgray') # Les non-oscillants en gris
-    
-    scatter = ax_graph.scatter(
-        pos[:, 0], pos[:, 1],
-        c=node_colors,
-        cmap=cmap,
-        s=60, edgecolors='white', linewidth=0.5,
-        picker=True # Active le picking natif matplotlib en backup
-    )
-    plt.colorbar(scatter, ax=ax_graph, label="Fréquence Dominante (Hz)")
-    ax_graph.set_title("Carte des Fréquences (Click to inspect)", fontsize=14)
-    ax_graph.set_aspect('equal')
-    ax_graph.axis('off')
-
-    # --- LOGIQUE D'AFFICHAGE FFT (PANNEAU DE DROITE) ---
-    trace_line, = ax_fft.plot([], [], color='#1f77b4', lw=1.5, label='Power Spectrum')
-    peak_point, = ax_fft.plot([], [], 'rx', markersize=10, markeredgewidth=2, label='Peak')
-    threshold_line = ax_fft.axhline(min_power, color='k', linestyle='--', alpha=0.5, label=f'Min Power ({min_power})')
-    
-    
-    ax_fft.set_xlabel("Frequency (Hz)")
-    ax_fft.set_ylabel("Power (|FFT|^2)")
-    ax_fft.grid(True, which='both', alpha=0.3)
-    ax_fft.legend()
-
-    # Arbre KD pour le clic rapide
-    tree = KDTree(pos)
-
-    def update_fft_plot(node_idx):
-        """Recalcule et affiche la FFT pour un noeud spécifique"""
-        # 1. Calcul local (identique au calcul global mais pour 1 noeud)
-        signal = X[:, node_idx]
-        sig_centered = signal - np.mean(signal)
-        
-        fft_spectrum = np.fft.rfft(sig_centered)
-        power = np.abs(fft_spectrum)**2
-        freqs = np.fft.rfftfreq(n_time, d=dt)
-        
-        # 2. Mise à jour des données du plot
-        # On affiche tout le spectre, mais on zoomera sur la partie utile
-        trace_line.set_data(freqs, power)
-        
-        # 3. Trouver le pic pour l'affichage visuel
-        valid_mask = freqs >= f_min
-        if np.any(valid_mask):
-            sub_power = power[valid_mask]
-            sub_freqs = freqs[valid_mask]
-            
-            idx_max = np.argmax(sub_power)
-            peak_p = sub_power[idx_max]
-            peak_f = sub_freqs[idx_max]
-            
-            peak_point.set_data([peak_f], [peak_p])
-            
-            # Titre dynamique
-            status = "OSCILLATING" if peak_p > min_power else "NOISE / SILENT"
-            color_status = "green" if peak_p > min_power else "gray"
-            ax_fft.set_title(f"Node {node_idx} | Peak: {peak_f:.3f} Hz | Power: {peak_p:.1f}\nStatus: {status}", 
-                             fontsize=12, color=color_status, fontweight='bold')
-            
-            # Ajustement des limites des axes pour bien voir le pic
-            ax_fft.set_xlim(0, max(peak_f * 2, 0.5)) # On affiche jusqu'à 2x la fréquence du pic
-            # Y limite : un peu au dessus du pic, ou au moins au dessus du seuil
-            ymax = max(peak_p * 1.1, min_power * 1.5)
-            ax_fft.set_ylim(-0.05 * ymax, ymax)
-            
-        else:
-            ax_fft.set_title(f"Node {node_idx} : Signal invalid (Frequency too low)")
-
-        fig.canvas.draw_idle()
-
-    # --- GESTION DU CLIC ---
-    def on_click(event):
-        if event.inaxes != ax_graph:
-            return
-        
-        # Trouver le noeud le plus proche
-        dists, idx = tree.query([event.xdata, event.ydata])
-        # Petit seuil de distance pour éviter les clics fantomes loin du graphe
-        # (Optionnel, ici on prend toujours le plus proche)
-        
-        update_fft_plot(idx)
-
-    fig.canvas.mpl_connect('button_press_event', on_click)
-
-    # Initialisation sur le noeud 0
-    update_fft_plot(0)
-    
-    plt.tight_layout()
-    plt.show()
-
-
 
 if __name__ == "__main__":
-    # Remplace par un chemin valide
-    file = "Data_output/20251225-130416_paper_config_for_CS_Diff/ts_N1000_Coup3.500_cr1.500_G-3c6fab93.h5"
-    plot_interactive_fft(file, min_power=1.0e8, f_min=0.01)
-    animate_with_tracer(file, fps=30)
-
-
+    animate_with_tracer(
+        "/Users/constantindeumier/Desktop/Numerical_Project/Numerical_Project/run/Data_output/20251227-174003_paper_config_for_CS/ts_N1000_Coup0.010_cr0.400_G-9c643bb0.h5"
+    )

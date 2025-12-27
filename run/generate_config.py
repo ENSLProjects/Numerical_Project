@@ -17,7 +17,7 @@ from bnn_package import (
 )
 
 
-# ======================= Functions =============================
+# ======================= Functions
 
 
 def build_and_save_graph(config, registry_dir):
@@ -41,49 +41,11 @@ def build_and_save_graph(config, registry_dir):
     pos = pos_nodes_uniform(n_nodes, xmax, ymax, rng)
     adjacency = connexion_normal_deterministic(pos, rng, config["std"])
 
-    # Make the graph connected 
-    degrees = np.sum(adjacency, axis=1)
-    isolated_nodes = np.where(degrees == 0)[0]
-
-    if len(isolated_nodes) > 0:
-        print(f"  [Connectivity Fix] Found {len(isolated_nodes)} isolated nodes. Connecting them to nearest neighbors...")
-        
-        
-        pos_T = pos.T 
-
-        for node_idx in isolated_nodes:
-            # 1. Get coordinates of the isolated node
-            current_pos = pos_T[node_idx]
-            
-            # 2. Compute Euclidean distance squared to all other nodes
-            # (broadcasting: subtraction applies to all rows of pos_T)
-            dists = np.sum((pos_T - current_pos)**2, axis=1)
-            
-            # 3. Exclude the node itself (distance 0) by setting it to infinity
-            dists[node_idx] = np.inf
-            
-            # 4. Find the nearest neighbor index
-            nearest_neighbor = np.argmin(dists)
-            
-            # 5. Force connection in Adjacency matrix (Undirected)
-            adjacency[node_idx, nearest_neighbor] = 1
-            adjacency[nearest_neighbor, node_idx] = 1
-            
-            # Debug info (optional)
-            # dist_val = np.sqrt(dists[nearest_neighbor])
-            # print(f"    - Connected Node {node_idx} to {nearest_neighbor} (dist: {dist_val:.2f})")
-    else:
-        print("  [Connectivity Fix] No isolated nodes found.")
-
-
     print("\n ---------> Graph Generated")
     which_analysis = config.get("quick_analyze_graph", True)
     print_simulation_report(
         adjacency, fast_mode=which_analysis
     )  # Fast mode for cleaner logs
-
-    
-
 
     # 3. Add Passive Nodes
     G = nx.from_numpy_array(adjacency)
@@ -127,24 +89,25 @@ def create_experiment_config(experiment_name, **kwargs):
         # --- GRAPH ARCHITECTURE ---
         "number_of_nodes": 1000,
         "square_for_graph": [10.0, 10.0],
-        "diffusive_operator": "Diffusive",  # "Diffusive" or "Laplacian"
-        "std": 0.3,  # Connection radius (Gaussian sigma)
-        "mean_poisson": 0.7,  # Passive nodes per active node
+        "diffusive_operator": "Laplacian",  # "Diffusive" or "Laplacian"
+        "std": 1.0,  # Connection radius (Gaussian sigma)
+        "mean_poisson": 3,  # Passive nodes per active node
         # --- PHYSICS (FHN Model) ---
-        "total_time": 50000,  # Total Steps
-        "transitory_time": 1000,  # Washout Steps
+        "total_time": 300000,  # Total Steps
+        "transitory_time": 10000,  # Washout Steps
         "dt": 0.01,
         # Model Parameters
         "alpha": 0.2,  # Parameter alpha
         "a": 3.0,
         "k": 0.25,  # Passive Coupling Strength
         "vrp": 1.5,  # Resting Potential
-        "fhn_eps": 0.08,   # Time Scale Separation (Internal Physics)
+        "fhn_eps": 0.08,  # Time Scale Separation (Internal Physics)
         # --- SWEEP PARAMETERS ---
-        "epsilon": 0,  # NETWORK COUPLING STRENGTH (Sigma)
-        "metrics" : ["COH", "OSC", "FMSD"],
-        "cr": 0,  # Resistive Coupling Strength
-        "threshold" : 0.7,
+        "epsilon": 0.1,  # NETWORK COUPLING STRENGTH (Sigma)
+        "metrics": ["COH","OSC","FMSD"],
+        "cr": 1.0,  # Resistive Coupling Strength
+        # ---Order Hyperparameters
+        "threshold" : 0.8,
         # --- PROVENANCE ---
         "existing_graph_path": None,  # Will be filled automatically
     }
@@ -177,12 +140,14 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(
-        "Phase_Diagram",
-        mode="run_order_parameter",   #"run_order_parameter" "time_series"
+        "paper_config_for_CS",
+        mode="run_order_parameter",
         quick_analyze_graph=False,
         parallel=True,
-        cr=np.linspace(0, 2, 35).tolist(),
+        cr=0.4,
         total_time=100000,
         transitory_time=0,
-        epsilon=np.linspace(0, 3.5, 35).tolist(),
+        mean_poisson=0.7,
+        epsilon=[0.01],
+        std=0.9,
     )

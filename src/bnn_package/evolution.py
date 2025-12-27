@@ -82,37 +82,36 @@ class FitzHughNagumoModel:
         self.n_p = np_vec
 
     def derivatives(self, state, t, current_input):
+        """
+        Computes dState/dt.
+        State shape: (3, N) -> [v_active, w, v_passive]
+        """
         v = state[0]
         w = state[1]
         v_p = state[2]
 
-        # Calcul de base : Somme ou Moyenne des voisins selon la matrice
         interaction = self.coupling_op @ v
 
-        # --- CORRECTION DE LA PHYSIQUE DU COUPLAGE ---
-        if self.type_diff == 1:  # Laplacian (Non-Normalisé, Somme)
-            # Matrice L = D - A.
-            # Diffusion = - sigma * L * v
-            # Le signe MOINS est crucial pour stabiliser (diffuser vers l'équilibre)
+        if self.type_diff == 1:  # Laplacian
             coupling_term = -self.coupling_str * interaction
-            
-        else:  # Diffusive (Normalisé, Moyenne)
-            # Interaction contient la MOYENNE des voisins (<V_j>)
-            # Diffusion = sigma * (<V_j> - V_i)
-            # On ne 'mixe' pas (1-s)*v, on prend la différence (le gradient)
+        else:  # Diffusive
             coupling_term = self.coupling_str * (interaction - v)
 
         passive_interaction = self.c_r * (v_p - v)
 
+        # dv/dt
         dv = (
-            self.a * (v * (v - self.alpha) * (1.0 - v)) 
-            - w 
-            + coupling_term  # Maintenant c'est un flux correct
-            + current_input 
-            + (passive_interaction * self.n_p)
+            self.a * (v * (v - self.alpha) * (1.0 - v))  # Local Dynamics
+            - w  # Recovery
+            + coupling_term  # Network Diffusion
+            + current_input  # External Input
+            + (passive_interaction * self.n_p)  # Feedback from passive nodes
         )
 
+        # dw/dt
         dw = self.fhn_eps * (v - w)
+
+        # dv_p/dt
         dv_p = self.k * (self.v_rp - v_p) - passive_interaction
 
         d_state = np.empty_like(state)

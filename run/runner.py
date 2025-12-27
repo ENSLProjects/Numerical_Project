@@ -108,11 +108,8 @@ def main():
     # --- EXECUTION ---
     use_parallel = config.get("parallel", False)
     ratio_cpu = config.get("cores_ratio", 0.8)
-    cpu_logical = multiprocessing.cpu_count()
-    MAX_CORES = 16  # par exemple
+    n_cores = max(1, int(multiprocessing.cpu_count() * ratio_cpu))
 
-    n_cores = int(cpu_logical * ratio_cpu)
-    n_cores = max(1, min(n_cores, MAX_CORES))
     output_file = os.path.join(result_dir, config.get("output_file", "results.csv"))
 
     print(f"\n{'=' * 60}")

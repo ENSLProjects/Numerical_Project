@@ -8,9 +8,10 @@ from bnn_package import measure
 
 rng = default_rng(42)
 
+
 @pytest.fixture
 def graph_params():
-    """Provides standard parameters for graph building tests."""  
+    """Provides standard parameters for graph building tests."""
     return {"rng": rng, "N": 10, "xmax": 10.0, "ymax": 10.0}
 
 
@@ -25,7 +26,9 @@ def evo_params():
         "adj": np.eye(m),  # Self-connected for simplicity
     }
 
+
 # ======================= Tests for measure.py
+
 
 def test_prepare_data_reshaping():
     """Test if 1D arrays are correctly reshaped to (1, N)"""
@@ -42,9 +45,7 @@ def test_find_settling_time_exact():
     # Signal 0 -> 100 at index 10
     signal = np.concatenate([np.zeros(10), np.ones(10) * 100])
 
-    result = measure.find_settling_time(
-        signal, final_n_samples=5, tolerance_percent=1
-    )
+    result = measure.find_settling_time(signal, final_n_samples=5, tolerance_percent=1)
     idx = result if isinstance(result, (int, np.integer)) else result[0]
 
     # It should start "settling" around index 10

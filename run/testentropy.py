@@ -2,10 +2,10 @@ import numpy as np
 from bnn_package import prepare_data
 
 # --- PATCH DE COMPATIBILITÉ (Indispensable pour Numpy récent) ---
-if not hasattr(np, 'int'):
-    setattr(np, 'int', int)
-if not hasattr(np, 'float'):
-    setattr(np, 'float', float)
+if not hasattr(np, "int"):
+    setattr(np, "int", int)
+if not hasattr(np, "float"):
+    setattr(np, "float", float)
 
 import entropy.entropy as ee
 
@@ -29,11 +29,11 @@ ee.set_verbosity(1)
 print("-" * 30)
 try:
     h = ee.compute_entropy(
-        x=x, 
-        n_embed=1,   # Dimension de plongement (1 = brut)
-        stride=1,    # Pas de décalage
-        k=3,         # 3 plus proches voisins
-        N_eff=-1     # CRITIQUE : utilise tous les points dispos (évite le crash)
+        x=x,
+        n_embed=1,  # Dimension de plongement (1 = brut)
+        stride=1,  # Pas de décalage
+        k=3,  # 3 plus proches voisins
+        N_eff=-1,  # CRITIQUE : utilise tous les points dispos (évite le crash)
     )
     print(f"Entropie H(X) : {h}")
 except Exception as e:
@@ -44,10 +44,10 @@ print("-" * 30)
 try:
     # Elle compare deux signaux bruts X et Y.
     mi_result = ee.compute_MI(
-        x=x, 
-        y=y, 
-        k=3, 
-        N_eff=-1     # CRITIQUE ici aussi
+        x=x,
+        y=y,
+        k=3,
+        N_eff=-1,  # CRITIQUE ici aussi
     )
 
     mi = mi_result[0]
@@ -55,9 +55,6 @@ try:
     print(f"Info Mutuelle I(X;Y) : {mi}")
 
 
-
-
-    
 except TypeError as e:
     print(f"Erreur d'arguments : {e}")
     print("Essai de secours (arguments positionnels)...")
@@ -73,17 +70,10 @@ except Exception as e:
 print("-" * 30)
 
 
-
 # -- Calcul Tranfert entropy ---
 print("-" * 30)
 try:
-    te_result = ee.compute_TE(
-        x=x,
-        y=y,
-        k=3,
-        N_eff=-1,
-        lag = 2
-    )
+    te_result = ee.compute_TE(x=x, y=y, k=3, N_eff=-1, lag=2)
 
     te = te_result[0]
 
@@ -97,8 +87,7 @@ except TypeError as e:
         te = ee.compute_transfer_entropy(x, y, 3, -1)
         print(f"Transfert d'Entropie (Positionnel) : {te}")
     except Exception as e2:
-        print(f"Echec total TE : {e2}")     
+        print(f"Echec total TE : {e2}")
 except Exception as e:
     print(f"Erreur TE Générale : {e}")
 print("-" * 30)
-

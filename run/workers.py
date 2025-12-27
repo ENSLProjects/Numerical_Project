@@ -14,7 +14,7 @@ from bnn_package.evolution import (
     FitzHughNagumoModel,
 )
 from bnn_package.data_processing import save_simulation_data
-from bnn_package.measure import AVAILABLE_METRICS, detect_oscillating_nodes
+from bnn_package.measure import AVAILABLE_METRICS_ORDER_PARAMETER
 
 
 # ======================= Helper Functions =======================
@@ -86,9 +86,9 @@ def time_series(params):
     rng = default_rng(params.get("seed", None))
 
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.5 * rng.standard_normal(n_nodes)
-    State_0[1] = 0.0 + 0.01 * rng.standard_normal(n_nodes)
-    State_0[2] = 1.2 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
 
     # 3. Run
     full_data = evolve_system(
@@ -124,17 +124,11 @@ def run_order_parameter(params):
 
     # State Init
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.5 * rng.standard_normal(n_nodes)
-    State_0[1] = 0.0 + 0.01 * rng.standard_normal(n_nodes)
-    State_0[2] = 1.2 + 0.1 * rng.standard_normal(n_nodes)
-
-    # Definite input signal 
-    #node_indexes = rng.ramdom.uniform(n_nodes,5)
-    #input_signal = 
+    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
 
     # 2. Run
     traj = evolve_system(
-        model, State_0, total_time_steps, input_signal= None, stepper_func=rk4_step
+        model, State_0, total_time_steps, input_signal=None, stepper_func=rk4_step
     )
 
     # 3. Measure
@@ -153,9 +147,10 @@ def run_order_parameter(params):
     }
 
     metrics = params.get("metrics")
+
     for m in metrics:
-        if m in AVAILABLE_METRICS:
+        if m in AVAILABLE_METRICS_ORDER_PARAMETER:
             # Metrics must handle (Time, Nodes) input
-            results[m] = AVAILABLE_METRICS[m](voltage_data, params)
+            results[m] = AVAILABLE_METRICS_ORDER_PARAMETER[m](voltage_data)
 
     return results

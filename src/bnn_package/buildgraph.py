@@ -1,6 +1,8 @@
 #!/usr/bin/env/python3
 
 # ======================= Libraries
+
+
 import numpy as np
 from numpy.random import Generator
 from scipy.spatial.distance import pdist, squareform
@@ -8,6 +10,8 @@ import numba
 
 
 # ======================= Functions
+
+
 def pos_nodes_uniform(N: int, xmax: float, ymax: float, rng: Generator):
     """
     return N points randomly distributed with uniform law in the rectangle of vertex [(0, 0), (0, xmax), (xmax, ymax), (ymax, 0)]
@@ -142,36 +146,57 @@ def connexion_normal_deterministic(pos, rng: Generator, std: float):
     return connectivity
 
 
-def add_passive_nodes(G, f,rng):
+def add_passive_nodes(G, f, rng):
     """
-    Ajoute des nœuds passifs à un graphe G selon une loi de Poisson de moyenne f.
-
-    Args:
-        G (nx.Graph): Graphe d'entrée (nœuds actifs).
-        f (float): Moyenne de la loi de Poisson pour le nombre de nœuds passifs par nœud actif.
-
-    Returns:
-        nx.Graph: Nouveau graphe avec nœuds actifs + passifs.
+    Adds passive nodes to graph G based on Poisson distribution.
     """
-
     new_G = G.copy()
 
+    # 1. Label existing nodes as 'active'
+    for node in list(new_G.nodes()):
+        new_G.nodes[node]["type"] = "active"
 
-    N_p = np.identity(len(G.nodes()))
-    i = 0
-    for active_node in G.nodes():
+    print("\n" + 60 * "=")
+    print("\nTOTAL GRAPH TOPOLOGY SUMMARY")
+    print("-----------------------------")
+    print(f"Active Nodes: {len(G.nodes())}")
+    print(f"Poisson Mean (f): {f}")
 
-        n_p = rng.poisson(f)
-        new_G.nodes[active_node]["passives"] = n_p
-        N_p[i,i] = n_p
-        i += 1
-    
+    # 2. Generate counts
+    nodes_list = sorted(list(G.nodes()))
+    N_p = rng.poisson(f, size=len(nodes_list))
+
+    total_passive = np.sum(N_p)
+    print(f"Total Passive nodes to be created: {total_passive}")
+
+    if total_passive == 0:
+        print("WARNING: No passive nodes generated. Increase 'f' or check 'rng'.")
+        return new_G, N_p
+
+    # 3. Add passive nodes
+    next_node_id = max(nodes_list) + 1
+
+    for i, active_node in enumerate(nodes_list):
+        n_p = N_p[i]
+
+        # Store count on active node for reference
+        new_G.nodes[active_node]["passive_count"] = n_p
+
+        for j in range(n_p):
+            passive_node_id = next_node_id
+
+            # Add node with explicit type
+            new_G.add_node(passive_node_id, type="passive")
+            new_G.add_edge(active_node, passive_node_id)
+
+            next_node_id += 1
+
     return new_G, N_p
 
 
-
-
-       
-
-
-
+############## NEXT STEPS
+# ---- connect component check make the generated adjacency matrix connected
+# ---- add heterogeneity
+# ---- add edge weightening: the connectivity is not 0 or 1 but a weight
+# ---- generalize for D dimensional space instead of hardocing for D=2 here
+# ---- add generality for connexion functions (give the kernel distance as input for more generality)

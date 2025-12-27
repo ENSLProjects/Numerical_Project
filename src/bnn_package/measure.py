@@ -9,7 +9,7 @@ from scipy.spatial.distance import pdist  # noqa: F401
 import networkx as nx
 from tabulate import tabulate
 import time
-#import entropy.entropy as ee
+import entropy.entropy as ee
 from tqdm import tqdm
 
 
@@ -227,113 +227,13 @@ def kuramoto_order(X, Y, N, t):
     return np.abs(z)
 
 
-# ------- The order parameters -------------
-
-def detect_oscillating_nodes(X, params, min_power=1.0e8, f_min=0.01):
-    """
-    Détection d'oscillations via FFT (Fast Fourier Transform).
-    
-    Arguments:
-    ----------
-    X : array (n_time, n_nodes)
-        Séries temporelles des potentiels.
-    params : dict
-        Doit contenir "dt".
-    min_power : float
-        Puissance spectrale minimale pour considérer que le noeud oscille.
-        Remplace 'amp_min'. À ajuster selon l'échelle de tes données.
-    f_min : float
-        Fréquence minimale ignorée (pour éviter le bruit basse fréquence/dérive).
-        
-    Retourne:
-    ---------
-    is_osc : bool array (n_nodes,)
-    freq   : float array (n_nodes,) - Fréquence dominante en Hz
-    """
-    n_time, n_nodes = X.shape
-    dt = params["dt"]
-    
-    X_centered = X - np.mean(X, axis=0)
-
-
-    fft_spectrum = np.fft.rfft(X_centered, axis=0)
-    
-    # 3. Calculer le spectre de puissance (Power Spectrum)
-    power_spectrum = np.abs(fft_spectrum)**2
-    
-    # 4. Obtenir les fréquences correspondantes aux indices de la FFT
-    freqs = np.fft.rfftfreq(n_time, d=dt)
-    
-    # --- FILTRAGE DES BASSES FRÉQUENCES ---
-    # On ignore les fréquences très basses (drift lent)
-    valid_idx = freqs >= f_min
-    
-
-    restricted_power = power_spectrum[valid_idx, :]
-    restricted_freqs = freqs[valid_idx]
-    
-    if restricted_power.shape[0] == 0:
-        # Cas extrême où tout est sous f_min
-        return np.zeros(n_nodes, dtype=bool), np.zeros(n_nodes)
-
-    # 5. Trouver le pic (fréquence dominante) pour chaque noeud
-    # argmax retourne l'indice du pic dans la dimension restreinte
-    peak_indices = np.argmax(restricted_power, axis=0)
-    
-    # Récupérer la puissance max et la fréquence correspondante
-    max_powers = restricted_power[peak_indices, np.arange(n_nodes)]
-    peak_freqs = restricted_freqs[peak_indices]
-    
-    # 6. Décision : Oscillant ou Bruit ?
-    # Si le pic de puissance est trop faible, c'est juste du bruit de fond
-    is_osc = max_powers > min_power
-    
-    # Mettre à NaN ou 0 les fréquences des non-oscillants
-    final_freqs = peak_freqs.copy()
-    final_freqs[~is_osc] = np.nan
-    
-    return is_osc, final_freqs
-
-def COH(Trajectory, params):
-    threshold = params.get("threshold", 0.0)  # par ex. 0.0 comme défaut
-    frac_active = (Trajectory >= threshold).mean(axis=1)   # (n_time,)
-    F = np.percentile(frac_active, 95.0)  # max sur le temps de la fraction de neurones "actifs"
-    return float(F)
-
-def OSC(Trajectory, params):
-    dt = params["dt"]
-    is_osc, _ = detect_oscillating_nodes(Trajectory, params)
-    osc_fraction = np.mean(is_osc) 
-    return osc_fraction
-
-def FMSD(Trajectory, params):
-    # 1. Récupérer paramètres temporels
-
-    dt = params["dt"]
-    
-
-
-    # 3. Détection
-    is_osc, freq = detect_oscillating_nodes(Trajectory, params)
-
-    # Sécurité si rien n'oscille
-    if not np.any(is_osc):
-        return 0.0
-
-    freq_use = freq[is_osc]       
-    sigma_nu = np.std(freq_use)
-
-
-        
-    return sigma_nu
-
-
 
 
 # --- THE REGISTRY ---
 
-AVAILABLE_METRICS = {
-    "COH": COH,
-    "OSC": OSC,
-    "FMSD": FMSD,
+AVAILABLE_METRICS_ORDER_PARAMETER = {
+    "sync_error": Synchronized_error,
+    "kuramoto": kuramoto_order,
+    "mean standard deviation": MSD_vec_xy,
+    # Add
 }
