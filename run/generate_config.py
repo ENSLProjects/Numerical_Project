@@ -76,10 +76,10 @@ def create_experiment_config(experiment_name, **kwargs):
     """
     Creates a standardized .yaml config file for the runner.
     """
-    # 1. Base Template
+    # 1. Base Template (Physics & Execution)
     template = {
         # --- EXECUTION ---
-        "mode": "sweep",  # "sweep" or "time_series"
+        "mode": "sweep",  # "sweep", "time_series", or "research_alignment"
         "output_file": f"results_{experiment_name}.csv",
         "parallel": True,
         "cores_ratio": 0.8,
@@ -108,13 +108,26 @@ def create_experiment_config(experiment_name, **kwargs):
         "cr": 1.0,  # Resistive Coupling Strength
         # ---Order Hyperparameters
         "threshold" : 0.8,
+         # --- RESEARCH ANALYSIS ---
+        # This block is only utilized if mode == "research_alignment"
+        "research_analysis": {
+            "active": False,
+            "te_lags": [1, 5, 10],
+            "stratified_sampling": {"n_dist1": 1000, "n_dist2": 1000, "n_dist3": 1000},
+            "kNN": 5,
+            "n_eff": 4096,
+        },
         # --- PROVENANCE ---
         "existing_graph_path": None,  # Will be filled automatically
     }
 
     # 2. Override with User Arguments
     for key, value in kwargs.items():
-        template[key] = value
+        # Handle nested research_analysis updates if provided as a dict
+        if key == "research_analysis" and isinstance(value, dict):
+            template["research_analysis"].update(value)
+        else:
+            template[key] = value
 
     # 3. Graph Provenance Check
     if not template.get("existing_graph_path"):
@@ -125,7 +138,6 @@ def create_experiment_config(experiment_name, **kwargs):
     # 4. Save YAML
     config_dir = "run/configs"
     os.makedirs(config_dir, exist_ok=True)
-
     filename = os.path.join(config_dir, f"{experiment_name}.yaml")
 
     with open(filename, "w") as f:
@@ -150,4 +162,32 @@ if __name__ == "__main__":
         mean_poisson=0.7,
         epsilon=[0.01],
         std=0.9,
+    )
+
+    create_experiment_config(   
+        "simulation_optimal_linear_cr_epsilon",
+        mode="research_alignment",
+        quick_analyze_graph=False,
+        parallel=True,
+        cores_ratio=0.5,
+        cr=0.495,
+        total_time=100000,
+        transitory_time=1000,
+        mean_poisson=0.7,
+        epsilon=0.012,
+        std=0.9,
+        research_analysis={
+            "active": True,
+            # Minimal lags to find the minimum quickly
+            "te_lags": [1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50, 100, 200, 500],
+            # Fast/Coarse settings
+            "n_real": 50,
+            "n_eff": 4096,
+            "kNN": 5,
+            # Light sampling (200 pairs per distance)
+            "stratified_sampling": {"n_dist1": 2000, "n_dist2": 2000, "n_dist3": 2000},
+            # We only need KL to find the "Goldilocks Zone"
+            "metrics": ["kl_divergence", "cca_alignment"],
+        },
+        existing_graph_path="Data_output/graphs_registry/graph_N1000_std0.9_c267b0d5.npz",
     )
