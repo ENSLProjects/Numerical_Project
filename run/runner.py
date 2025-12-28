@@ -59,7 +59,12 @@ from bnn_package import (  # noqa: E402
     load_config,
     corrupted_simulation,  # noqa: F401
 )
-from workers import run_order_parameter, time_series, research_alignment_worker  # noqa: E402
+from workers import (  # noqa: E402
+    run_order_parameter,
+    time_series,
+    research_alignment_worker,
+    raw_te_propagator,
+)
 
 
 # ======================= Functions
@@ -145,6 +150,7 @@ def main():
         "time_series": time_series,
         "sweep": run_order_parameter,
         "research_alignment": research_alignment_worker,
+        "te_propagator": raw_te_propagator,
     }
 
     target_function = mode_map.get(mode, run_order_parameter)

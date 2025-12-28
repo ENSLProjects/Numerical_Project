@@ -165,14 +165,15 @@ def time_series(params):
 
     # Total steps (Time / dt)
     total_time_steps = int(params.get("total_time", 1000))
-
+    noise = float(params.get("noise", 0.1))
     # 2. Random State Init
     rng = default_rng(params.get("seed", None))
+    noise = params.get("noise", 0.0)
 
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + noise * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + noise * rng.standard_normal(n_nodes)
 
     # 3. Run
     full_data = evolve_system(
@@ -208,10 +209,10 @@ def run_order_parameter(params):
     total_time_steps = int(params["total_time"])
 
     rng = default_rng(params.get("seed", None))
-
+    noise = params.get("noise", 0.0)
     # State Init
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
 
     # 2. Run
     traj = evolve_system(
@@ -257,11 +258,12 @@ def research_alignment_worker(params):
     total_time = int(params["total_time"])
     rng = default_rng(params.get("seed", None))
     n_nodes = params["number_of_nodes"]
+    noise = params.get("noise", 0.0)
 
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + noise * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + noise * rng.standard_normal(n_nodes)
 
     traj = evolve_system(model, State_0, total_time, None, rk4_step)
 
@@ -362,5 +364,123 @@ def research_alignment_worker(params):
             if metric_name in RESEARCH_METRICS:
                 score = RESEARCH_METRICS[metric_name](vec_means, vec_theory)
                 results[f"{metric_name}_lag{tau}"] = score
+
+    return results
+
+
+def raw_te_propagator(params):
+    """
+    New Simulation Mode: 'raw_te_propagator'
+
+    Goal:
+        Perform a 'Link-by-Link' analysis to find the Transfer Function.
+        Simulates the system and saves the raw vectors:
+        X = Theoretical Propagator (exp(-L*tau))
+        Y = Measured Transfer Entropy
+
+    Output:
+        Saves one .npz file per lag in the output folder.
+    """
+    # 1. Setup
+    model, graph_uuid = common_worker_setup(params)
+    adj, _, _, _ = load_graph_topology(params["graph_file_path"])
+
+    # 2. Simulate
+    total_time = int(params["total_time"])
+    rng = default_rng(params.get("seed", 1234567890))
+    n_nodes = params["number_of_nodes"]
+    noise = params.get("noise", 0.0)
+
+    State_0 = np.zeros((3, n_nodes), dtype=np.float64)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + noise * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + noise * rng.standard_normal(n_nodes)
+
+    print(f"[Raw_TE] Starting Simulation (T={total_time})...")
+    traj = evolve_system(model, State_0, total_time, None, rk4_step)
+
+    # Extract Voltage (Post-Transitory)
+    start = int(params.get("transitory_time", 1000))
+    voltage_data = traj[start:, 0, :]
+
+    # Safety Checks
+    if not np.isfinite(voltage_data).all():
+        print("CRASH: Simulation exploded.")
+        return {"error": "Exploded"}
+    if np.std(voltage_data) < 1e-9:
+        print("ABORT: Fixed point detected.")
+        return {"error": "Fixed point"}
+
+    # 3. Analyze Link-by-Link
+    analysis_cfg = params.get("research_analysis", {})
+
+    # We use stratified sampling to get a representative cloud of points
+    pairs_dict = get_stratified_pairs(adj, analysis_cfg.get("stratified_sampling", {}))
+
+    lags_to_test = analysis_cfg.get("te_lags", [50, 100])  # Default to 100 if missing
+    n_real = analysis_cfg.get("n_real", 10)
+
+    output_folder = params.get("output_folder", "Data_output")
+
+    results = {
+        "epsilon": model.coupling_str,
+        "cr": model.c_r,
+        "status": "Saved Scatter Data",
+    }
+
+    for tau in lags_to_test:
+        print(f"[Raw_TE] Processing Lag {tau}...")
+
+        # A. Theoretical Propagator
+        if params.get("diffusive_operator", "Diffusive") == "Laplacian":
+            L_effective = model.coupling_op
+        else:
+            Identity = np.eye(model.coupling_op.shape[0])
+            L_effective = Identity - model.coupling_op
+
+        matrix_exponent = -model.coupling_str * L_effective * (tau * model.dt)
+        L_exp = expm(matrix_exponent)
+
+        measured_means = []
+        measured_stds = []
+        theory_vals = []
+
+        # B. Measure TE for every pair
+        for group, pairs in pairs_dict.items():
+            for u, v in pairs:
+                x = prepare_data(voltage_data[:, u])
+                y = prepare_data(voltage_data[:, v])
+
+                val_means, val_stds = compute_te_over_lags(
+                    x,
+                    y,
+                    [tau],
+                    n_real=n_real,
+                    n_eff=analysis_cfg.get("n_eff", 4096),
+                    kNN=analysis_cfg.get("kNN", 5),
+                    verbose=False,
+                )
+                measured_means.append(val_means[0])
+                measured_stds.append(val_stds[0])
+                theory_vals.append(L_exp[u, v])
+
+        # C. Save Raw Data
+        vec_means = np.array(measured_means)
+        vec_stds = np.array(measured_stds)
+        vec_theory = np.array(theory_vals)
+
+        scatter_filename = f"scatter_eps{model.coupling_str}_cr{model.c_r}_lag{tau}.npz"
+        scatter_path = os.path.join(output_folder, scatter_filename)
+
+        np.savez(
+            scatter_path,
+            theory=vec_theory,
+            te=vec_means,
+            te_std=vec_stds,
+            meta=np.array([model.coupling_str, model.c_r, tau]),
+        )
+        print(f"   -> Saved: {scatter_filename}")
+
+        results[f"file_lag{tau}"] = scatter_filename
 
     return results

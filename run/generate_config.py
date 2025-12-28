@@ -92,6 +92,7 @@ def create_experiment_config(experiment_name, **kwargs):
         "diffusive_operator": "Laplacian",
         "std": 1.0,
         "mean_poisson": 3,
+        "noise": 0.05,
         # --- PHYSICS (FHN Model) ---
         "total_time": 300000,
         "transitory_time": 10000,
@@ -149,11 +150,11 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(
-        "simulation_optimal_linear_cr_epsilon",
-        mode="research_alignment",
+        "try_raw_te_propagator",
+        mode="te_propagator",
         quick_analyze_graph=False,
         parallel=True,
-        cores_ratio=0.5,
+        cores_ratio=0.6,
         cr=0.495,
         total_time=100000,
         transitory_time=1000,
@@ -163,15 +164,13 @@ if __name__ == "__main__":
         research_analysis={
             "active": True,
             # Minimal lags to find the minimum quickly
-            "te_lags": [1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50, 100, 200, 500],
+            "te_lags": [50, 100, 200],
             # Fast/Coarse settings
-            "n_real": 50,
+            "n_real": 10,
             "n_eff": 4096,
             "kNN": 5,
             # Light sampling (200 pairs per distance)
-            "stratified_sampling": {"n_dist1": 2000, "n_dist2": 2000, "n_dist3": 2000},
-            # We only need KL to find the "Goldilocks Zone"
-            "metrics": ["kl_divergence", "cca_alignment"],
+            "stratified_sampling": {"n_dist1": 500, "n_dist2": 500, "n_dist3": 500},
         },
         existing_graph_path="Data_output/graphs_registry/graph_N1000_std0.9_c267b0d5.npz",
     )

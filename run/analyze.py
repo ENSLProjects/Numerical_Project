@@ -14,6 +14,8 @@ import sys
 import os
 import re
 import pandas as pd
+from scipy.optimize import curve_fit
+import glob
 
 
 # ======================= Functions
@@ -528,78 +530,182 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
     return ani
 
 
+# ======================= 1. CURVE FITTING MODELS =======================
+
+
+def power_law(x, a, k, c):
+    """The Candidate Law: TE = a * (Propagator)^k + c"""
+    return a * np.power(x, k) + c
+
+
+def linear_model(x, a, b):
+    """The Linear Channel: TE = a * x + b"""
+    return a * x + b
+
+
+# ======================= 2. ANALYSIS MODES =======================
+
+
+def analyze_deep_dive(folder_path):
+    """
+    Scans folder for 'scatter_*.npz' and performs Curve Fitting + Binning.
+    """
+    print(f"\n>>> [Deep Dive] Scanning folder: {folder_path}")
+    files = glob.glob(os.path.join(folder_path, "scatter_*.npz"))
+
+    if not files:
+        print(f"Error: No 'scatter_*.npz' files found in {folder_path}")
+        return
+
+    print(f"    Found {len(files)} scatter files. Analyzing...")
+
+    for file_path in files:
+        try:
+            filename = os.path.basename(file_path)
+            data = np.load(file_path)
+
+            if "theory" in data and "te" in data:
+                x_theory, y_te = data["theory"], data["te"]
+            else:
+                print(f"    [Skip] {filename} missing keys.")
+                continue
+
+            # Filter Noise
+            mask = (x_theory > 1e-9) & (y_te > 1e-9)
+            x, y = x_theory[mask], y_te[mask]
+
+            if len(x) < 10:
+                print("    [Skip] Not enough data points.")
+                continue
+
+            # --- 1. CURVE FITTING ---
+            try:
+                popt_pow, _ = curve_fit(power_law, x, y, p0=[1, 2, 0], maxfev=5000)
+                k = popt_pow[1]
+            except Exception:
+                k, popt_pow = 0.0, [0, 0, 0]
+
+            # --- 2. BINNED STATISTICS (The Noise Killer) ---
+            # We split the x-axis (Propagator) into 15 bins and average the TE in each.
+            nbins = 15
+            bins = np.linspace(np.min(x), np.max(x), nbins + 1)
+            bin_centers = 0.5 * (bins[:-1] + bins[1:])
+            bin_means = []
+            bin_errs = []
+
+            for i in range(nbins):
+                # Find all points in this slice of X
+                idx = (x >= bins[i]) & (x < bins[i + 1])
+                if np.sum(idx) > 5:  # Only compute if enough samples
+                    mean_val = np.mean(y[idx])
+                    std_err = np.std(y[idx]) / np.sqrt(np.sum(idx))
+                    bin_means.append(mean_val)
+                    bin_errs.append(std_err)
+                else:
+                    bin_means.append(np.nan)
+                    bin_errs.append(np.nan)
+
+            bin_means = np.array(bin_means)
+            bin_errs = np.array(bin_errs)
+
+            # --- 3. PLOTTING ---
+            plt.figure(figsize=(10, 6))
+
+            # A. The Cloud (Raw)
+            plt.scatter(x, y, alpha=0.15, s=10, c="gray", label="Raw Pairs (Noise)")
+
+            # B. The Signal (Binned) - THE TRUTH
+            valid_bins = ~np.isnan(bin_means)
+            plt.errorbar(
+                bin_centers[valid_bins],
+                bin_means[valid_bins],
+                yerr=bin_errs[valid_bins],
+                fmt="o-",
+                color="green",
+                lw=2,
+                capsize=4,
+                label="Binned Average (Signal)",
+            )
+
+            # C. The Fits
+            x_sort = np.sort(x)
+            if k != 0:
+                plt.plot(
+                    x_sort,
+                    power_law(x_sort, *popt_pow),
+                    "r--",
+                    lw=2,
+                    label=f"Power Law ($k={k:.2f}$)",
+                )
+
+            plt.xlabel(r"Theoretical Propagator $(e^{-\mathcal{L}\tau})_{ij}$")
+            plt.ylabel("Transfer Entropy (TE)")
+            plt.title(
+                f"Structure-Function Relationship ({filename})\nExponent k={k:.4f}"
+            )
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            out_name = os.path.join(
+                folder_path, filename.replace(".npz", "_binned.png")
+            )
+            plt.savefig(out_name, dpi=300)
+            plt.close()
+
+            print(
+                f"    --> Saved Binned Plot: {os.path.basename(out_name)} (k={k:.4f})"
+            )
+
+        except Exception as e:
+            print(f"    [Error] {filename}: {e}")
+
+
+# ======================= 3. VISUALIZATION FUNCTIONS (CSV) =======================
+
+
 def parse_columns(df):
-    """
-    Extracts metrics and lags from column names.
-    Returns: dict { 'metric_name': { lag: column_name } }
-    """
+    """Extracts metrics and lags from column names."""
     metrics = {}
-
-    # Regex to match "metric_name_lag123"
     pattern = re.compile(r"(.+)_lag(\d+)$")
-
     for col in df.columns:
         match = pattern.match(col)
         if match:
             name = match.group(1)
             lag = int(match.group(2))
-
             if name not in metrics:
                 metrics[name] = {}
             metrics[name][lag] = col
-
     return metrics
 
 
 def plot_phase_scan(df, metrics_map, output_prefix):
-    """
-    Plots Metric vs Epsilon (The 'U-Shape' finder).
-    """
-    print(">>> Detected PHASE SCAN mode (Multiple Epsilons).")
-
-    # Sort by epsilon for clean lines
+    """Plots Metric vs Epsilon (Phase Transition)."""
+    print(">>> Mode: PHASE SCAN (Metric vs Epsilon)")
     df = df.sort_values(by="epsilon")
-
     for metric_name, lag_dict in metrics_map.items():
         plt.figure(figsize=(10, 6))
-
-        # Plot a line for each Lag available
-        sorted_lags = sorted(lag_dict.keys())
-        for lag in sorted_lags:
-            col = lag_dict[lag]
-            plt.plot(df["epsilon"], df[col], marker="o", label=f"Lag {lag}")
-
+        for lag in sorted(lag_dict.keys()):
+            plt.plot(df["epsilon"], df[lag_dict[lag]], marker="o", label=f"Lag {lag}")
         plt.xscale("log")
         plt.xlabel(r"Coupling Strength $\epsilon$")
         plt.ylabel(metric_name.replace("_", " ").title())
-        plt.title(f"Phase Scan: {metric_name} vs Coupling")
-        plt.grid(True, which="both", linestyle="--", alpha=0.5)
+        plt.title(f"Phase Scan: {metric_name}")
+        plt.grid(True, linestyle="--", alpha=0.5)
         plt.legend()
-
-        outfile = f"{output_prefix}_{metric_name}_scan.png"
-        plt.savefig(outfile, dpi=300)
-        print(f"Saved: {outfile}")
+        plt.savefig(f"{output_prefix}_{metric_name}_scan.png", dpi=300)
         plt.close()
 
 
 def plot_time_evolution(df, metrics_map, output_prefix):
-    """
-    Plots Metric vs Lag (The 'Final Proof' time evolution).
-    """
-    print(">>> Detected TIME EVOLUTION mode (Single/Few Epsilons).")
-
-    # If multiple rows exist (e.g. multiple epsilons), we plot one line per row
+    """Plots Metric vs Lag (Time Dynamics)."""
+    print(">>> Mode: TIME EVOLUTION (Metric vs Lag)")
     for idx, row in df.iterrows():
         eps = row.get("epsilon", "unknown")
-
-        # Create one plot per metric (KL, CCA, MSE)
         for metric_name, lag_dict in metrics_map.items():
             lags = sorted(lag_dict.keys())
             values = [row[lag_dict[lag]] for lag in lags]
 
             plt.figure(figsize=(10, 6))
-
-            # Main Line
             plt.plot(
                 lags,
                 values,
@@ -609,58 +715,108 @@ def plot_time_evolution(df, metrics_map, output_prefix):
                 label=rf"$\epsilon={eps}$",
             )
 
-            # Theoretical embellishments for specific metrics
-            if "cca" in metric_name.lower():
-                # plt.axhline(
-                #    1.0, color="black", linestyle="--", label="Perfect Alignment"
-                # )
-                # plt.ylim(0, 1.1)
-                pass
-            elif "kl" in metric_name.lower():
-                plt.axhline(0.0, color="black", linestyle="--", label="Zero Divergence")
+            if "kl" in metric_name.lower():
+                plt.axhline(0.0, color="black", linestyle="--")
 
-            plt.xlabel("Lag $\\tau$ (Time Steps)")
+            plt.xlabel("Lag $\\tau$")
             plt.ylabel(metric_name.replace("_", " ").title())
-            plt.title(rf"Structural-Functional Alignment over Time\n($\epsilon={eps}$)")
+            plt.title(rf"Dynamics over Time ($\epsilon={eps}$)")
             plt.grid(True, alpha=0.3)
             plt.legend()
-
-            outfile = f"{output_prefix}_{metric_name}_eps{eps}_evolution.png"
-            plt.savefig(outfile, dpi=300)
-            print(f"Saved: {outfile}")
+            plt.savefig(
+                f"{output_prefix}_{metric_name}_eps{eps}_evolution.png", dpi=300
+            )
             plt.close()
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python plot_results.py <path_to_results.csv>")
-        sys.exit(1)
-
-    csv_path = sys.argv[1]
-    if not os.path.exists(csv_path):
-        print(f"Error: File {csv_path} not found.")
-        sys.exit(1)
-
+def analyze_csv(csv_path):
     df = pd.read_csv(csv_path)
-    print(f"Loaded {len(df)} rows from {csv_path}")
-
-    # 1. Parse Columns to find what data we have
     metrics_map = parse_columns(df)
     if not metrics_map:
         print("Error: No 'metric_lagX' columns found in CSV.")
         return
 
-    # 2. Determine Plot Mode
-    # If we have many epsilon points (>3), it's likely a sweep.
-    # If we have 1 or 2 epsilons, it's likely a proof run.
     unique_eps = df["epsilon"].nunique() if "epsilon" in df.columns else 0
-
     output_prefix = os.path.splitext(csv_path)[0]
 
     if unique_eps > 3:
         plot_phase_scan(df, metrics_map, output_prefix)
     else:
         plot_time_evolution(df, metrics_map, output_prefix)
+
+
+# ======================= 4. PLOTTING TRAJECTORIES (H5) =======================
+
+
+def plot_trajectory_preview(h5_path):
+    print(f">>> Mode: TRAJECTORY PREVIEW ({h5_path})")
+    try:
+        data = load_simulation_data(h5_path, graph=False)
+        traj = data["trajectory"]  # (Time, 3, Nodes) or (Time, Nodes, 3)
+
+        # Heuristic to find voltage
+        if traj.ndim == 3 and traj.shape[1] == 3:
+            voltage = traj[:, 0, :]
+        elif traj.ndim == 3 and traj.shape[2] == 3:
+            voltage = traj[:, :, 0]
+        else:
+            print(f"Error: Unknown shape {traj.shape}")
+            return
+
+        plt.figure(figsize=(12, 6))
+        # Plot first 5 nodes
+        time_axis = np.arange(voltage.shape[0]) * data["parameters"].get("dt", 0.01)
+        for i in range(min(5, voltage.shape[1])):
+            plt.plot(time_axis, voltage[:, i], label=f"Node {i}")
+
+        plt.xlabel("Time (s)")
+        plt.ylabel("Voltage")
+        plt.title("Simulation Preview (First 5 Nodes)")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.show()
+    except Exception as e:
+        print(f"Error loading H5: {e}")
+
+
+# ======================= MAIN DISPATCHER =======================
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("\nUsage:")
+        print(
+            "  1. Analyze Folder (Deep Dive):   uv run analyze.py Data_output/My_Folder/"
+        )
+        print("  2. Plot Results (CSV):           uv run analyze.py results.csv")
+        print("  3. Preview Sim (H5):             uv run analyze.py my_sim.h5")
+        sys.exit(1)
+
+    input_path = sys.argv[1]
+
+    # 1. Handle FOLDER input (Deep Dive)
+    if os.path.isdir(input_path):
+        analyze_deep_dive(input_path)
+
+    # 2. Handle FILE input
+    elif os.path.isfile(input_path):
+        ext = os.path.splitext(input_path)[1].lower()
+
+        if ext == ".csv":
+            analyze_csv(input_path)
+        elif ext == ".h5":
+            plot_trajectory_preview(input_path)
+        elif ext == ".npz":
+            # If pointing directly to a scatter file
+            parent_folder = os.path.dirname(input_path)
+            print(f"Detected single NPZ. Analyzing parent folder: {parent_folder}")
+            analyze_deep_dive(parent_folder)
+        else:
+            print(f"Error: Unknown file type '{ext}'")
+
+    else:
+        print(f"Error: Path not found: {input_path}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
