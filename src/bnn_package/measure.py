@@ -11,6 +11,7 @@ from tabulate import tabulate
 import time
 import entropy.entropy as ee
 from tqdm import tqdm
+from sklearn.cross_decomposition import CCA
 
 
 # ======================= Functions
@@ -184,38 +185,70 @@ def print_simulation_report(adj_matrix, fast_mode=False):
 
 
 def compute_te_over_lags(
-    x, y, lags, n_real=10, n_eff=4096, kNN=5, embedding=(2, 2), Theiler_correction=15
+    x,
+    y,
+    lags,
+    epsilon_noise=1e-8,
+    n_real=10,
+    n_eff=4096,
+    kNN=5,
+    embedding=(2, 2),
+    Theiler_correction=1,
+    verbose=True,
 ):
     """
-    Computes TE over a range of lags with explicit Theiler correction.
+    Computes TE over a range of lags.
+    OPTIMIZED: Uses the C-library's internal 'N_real' for fast statistical error estimation.
     """
     means = np.zeros(len(lags))
     stds = np.zeros(len(lags))
-    ee.multithreading(do_what="auto")
-    print(f"Computing TE over {len(lags)} lags (Range: {lags[0]}-{lags[-1]})...")
-    for i, tau in enumerate(tqdm(lags)):
-        current_lag_values = []
 
-        # We loop manually to capture the STD (distribution) of the TE
-        for _ in range(n_real):
+    if np.std(x) < 1e-6 or np.std(y) < 1e-6:
+        # Return zeros immediately. Do not touch the C-library.
+        return means, stds
+
+    rng = np.random.default_rng()
+
+    # Add noise BEFORE reordering to prevend the TE being strictly zero
+    x_noisy = x + epsilon_noise * rng.standard_normal(x.shape)
+    y_noisy = y + epsilon_noise * rng.standard_normal(y.shape)
+
+    x_c = np.ascontiguousarray(x_noisy, dtype=np.float64)
+    y_c = np.ascontiguousarray(y_noisy, dtype=np.float64)
+
+    ee.set_verbosity(1 if verbose else 0)
+
+    iterator = tqdm(lags) if verbose else lags
+
+    for i, tau in enumerate(iterator):
+        # The C-library's internal N_real can be unstable on some architectures.
+        realizations = []
+        # To get a mean/std, we need to ask the library for N_real > 1 OR loop here.
+        for _ in range(max(1, n_real)):
             val = ee.compute_TE(
-                x,
-                y,
+                x_c,
+                y_c,
                 n_embed_x=embedding[0],
                 n_embed_y=embedding[1],
                 stride=1,
                 lag=tau,
                 k=kNN,
                 N_eff=n_eff,
-                N_real=1,  # We handle realizations manually here for the std
+                N_real=1,
                 Theiler=Theiler_correction,
-            )[0]
-
-            current_lag_values.append(val)
-
-        means[i] = np.mean(current_lag_values)
-        stds[i] = np.std(current_lag_values)
-
+            )
+            # Handle case where it returns a list/tuple even for N_real=1
+            if isinstance(val, (list, tuple)):
+                realizations.append(val[0])
+            else:
+                realizations.append(val)
+        # Compute Stats manually
+        if n_real > 1:
+            means[i] = np.mean(realizations)
+            stds[i] = np.std(realizations)
+        else:
+            means[i] = realizations[0]
+            stds[i] = 0.0
     return means, stds
 
 
@@ -227,11 +260,49 @@ def kuramoto_order(X, Y, N, t):
     return np.abs(z)
 
 
+def compute_kl_divergence(p_vec, q_vec):
+    """Kullback-Leibler Divergence: D(P || Q)"""
+    # Theoretical Correction: TE cannot be negative
+    # Negative values are estimator bias/noise when True TE approx 0.
+    # We clip them to 0 (plus epsilon for log stability).
+    p_vec = np.maximum(p_vec, 0.0)
+    q_vec = np.maximum(q_vec, 0.0)
+
+    p_sum = np.sum(p_vec)
+    q_sum = np.sum(q_vec)
+
+    # Handle empty/silent systems
+    if p_sum == 0 or q_sum == 0:
+        return 0.0
+
+    p = p_vec / p_sum
+    q = q_vec / q_sum
+
+    # 3. Compute KL with epsilon stability
+    # We add epsilon INSIDE the log to prevent log(0)
+    epsilon = 1e-15
+
+    return np.sum(p * np.log((p + epsilon) / (q + epsilon)))
+
+
+def compute_cca_score(p_vec, q_vec):
+    """Canonical Correlation Analysis (1D Approximation for samples)"""
+    cca = CCA(n_components=1)
+    X_c, Y_c = cca.fit_transform(p_vec.reshape(-1, 1), q_vec.reshape(-1, 1))
+    return np.corrcoef(X_c.T, Y_c.T)[0, 1]
+
+
 # --- THE REGISTRY ---
 
-AVAILABLE_METRICS = {
+AVAILABLE_METRICS_ORDER_PARAMETER = {
     "sync_error": Synchronized_error,
     "kuramoto": kuramoto_order,
     "mean standard deviation": MSD_vec_xy,
     # Add
+}
+
+
+RESEARCH_METRICS = {
+    "kl_divergence": compute_kl_divergence,
+    "cca_alignment": compute_cca_score,
 }

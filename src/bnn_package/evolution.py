@@ -14,9 +14,19 @@ from numba.experimental import jitclass
 
 
 def get_coupling_operator(adjacency: np.ndarray, type_diff: str) -> np.ndarray:
-    """
-    Pre-computes the normalized adjacency matrix.
+    """Pre-computes the normalized adjacency matrix.
     Run this ONCE in pure Python before the simulation.
+
+    Args:
+        adjacency (np.ndarray): adjacency matrix
+        type_diff (str): type of coupling operator: Combinatory Laplacian or Normalized Laplacian
+
+    Raises:
+        ValueError: not connected graph
+        ValueError: unknown method for coupling operator
+
+    Returns:
+        np.ndarray: the coupling operator as a contiguous numpy array
     """
     if type_diff == "Diffusive":
         weights = np.sum(adjacency, axis=1)
@@ -82,9 +92,16 @@ class FitzHughNagumoModel:
         self.n_p = np_vec
 
     def derivatives(self, state, t, current_input):
-        """
-        Computes dState/dt.
+        """Computes dState/dt.
         State shape: (3, N) -> [v_active, w, v_passive]
+
+        Args:
+            state (np.ndarray): state of the system
+            t (int): time index
+            current_input (np.ndarray): vector of input intensity, intensity for each nodes
+
+        Returns:
+            np.ndarray: updated state wrt FitzHugh Nagumo equations
         """
         v = state[0]
         w = state[1]
@@ -178,7 +195,17 @@ class HenonMapModel:
 
 @numba.jit(nopython=True, nogil=True)
 def rk4_step(model, state, t, current_input):
-    """Runge-Kutta 4 Integrator for ODEs."""
+    """Runge-Kutta 4 Integrator for ODEs.
+
+    Args:
+        model (class): class model of the system: Henon, FitzHugh Nagumo etc
+        state (np.ndarray): state of the system
+        t (int): time index
+        current_input (np.ndarray): vector of input intensity, intensity for each nodes
+
+    Returns:
+        np.ndarray: state at the next step integrated thanks to rk4 integrator
+    """
     dt = model.dt
     k1 = model.derivatives(state, t, current_input)
     k2 = model.derivatives(state + 0.5 * dt * k1, t + 0.5 * dt, current_input)
@@ -207,15 +234,17 @@ def map_step(model, state, t, current_input):
 
 @numba.jit(nopython=True, nogil=True)
 def evolve_system(model, state_0, final_time, input_signal, stepper_func):
-    """
-    Generic Evolution Function.
+    """Generic Evolution Function.
 
     Args:
-        model: Physics Object (FHN, Henon...)
-        state_0: Initial state (Dim, N_nodes)
-        final_time: Total steps (int)
-        input_signal: (Time, Nodes) or None
-        stepper_func: Function to use (rk4_step, map_step...)
+        model (class): Physics Object (FHN, Henon...)
+        state_0 (np.ndarray): Initial state (Dim, N_nodes)
+        final_time (int): Total steps
+        input_signal (np.ndarray): (Time, N_nodes) or None
+        stepper_func (function): Function to use (rk4_step, map_step...)
+
+    Returns:
+        np.ndarray: return the full trajectory array (Time, Dim, N_nodes)
     """
     dim = state_0.shape[0]
     n_nodes = state_0.shape[1]

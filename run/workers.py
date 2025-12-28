@@ -6,15 +6,20 @@
 import numpy as np
 import os
 from numpy.random import default_rng
-
-from bnn_package.evolution import (
+from scipy.linalg import expm
+from bnn_package import (
     get_coupling_operator,
     evolve_system,
     rk4_step,
+    prepare_data,
+    compute_te_over_lags,
     FitzHughNagumoModel,
+    save_simulation_data,
+    AVAILABLE_METRICS_ORDER_PARAMETER,
+    RESEARCH_METRICS,
 )
-from bnn_package.data_processing import save_simulation_data
-from bnn_package.measure import AVAILABLE_METRICS
+import random
+import networkx as nx
 
 
 # ======================= Helper Functions =======================
@@ -26,6 +31,39 @@ def load_graph_topology(path):
     # Handle older graph files that might not have uuid
     graph_uuid = str(data["uuid"]) if "uuid" in data else "unknown"
     return (data["adjacency"], data["positions"], data["passive_counts"], graph_uuid)
+
+
+def get_stable_dt(params, adjacency):
+    """
+    Heuristic to determine a stable dt for FitzHugh-Nagumo.
+    Accounts for stiffness (fhn_eps) and network coupling (spectral radius).
+    """
+    # 1. Local Dynamics: Stability is limited by the fast/slow timescale ratio
+    # If fhn_eps is very small, the recovery variable 'w' is much slower than 'v'
+    fhn_eps = float(params.get("fhn_eps", 0.08))
+    tau_local = 1.0 / fhn_eps
+
+    # 2. Network Dynamics: Stability is limited by the coupling strength and graph
+    # For Laplacian/Diffusive operators, we estimate the spectral radius
+    coupling_str = float(params.get("epsilon", 0.01))
+    diff_type = params.get("diffusive_operator", "Diffusive")
+
+    if diff_type == "Laplacian":
+        # Gershgorin circle theorem upper bound for Laplacian: 2 * max_degree
+        degrees = np.sum(adjacency, axis=1)
+        spec_radius = 2.0 * np.max(degrees)
+    else:
+        # For diffusive/row-normalized matrices, the max eigenvalue is ~1
+        spec_radius = 1.0
+
+    tau_net = 1.0 / (coupling_str * spec_radius)
+
+    # 3. Apply safety margin (RK4 typically requires dt < 10% of fastest timescale)
+    # We take the minimum of local, network, and a baseline safety value (0.05)
+    suggested_dt = min(tau_local, tau_net, 1.0) * 0.05
+
+    # Ensure it's not too small (performance) or too large (instability)
+    return max(min(suggested_dt, 0.01), 0.001)
 
 
 def create_model(params, adjacency, N_p):
@@ -42,7 +80,7 @@ def create_model(params, adjacency, N_p):
     fhn_eps = float(params.get("fhn_eps", 0.08))
     alpha = float(params.get("alpha", 0.2))
     k = float(params.get("k", 0.25))
-    dt = float(params.get("dt", 0.01))
+    dt = get_stable_dt(params, adjacency)
     cr = float(params.get("cr", 1.0))
     a = float(params.get("a", 3.0))
     vrp = float(params.get("vrp", 1.5))
@@ -71,6 +109,52 @@ def common_worker_setup(params):
     return model, graph_uuid
 
 
+def get_stratified_pairs(adjacency, config):
+    """
+    Selects pairs based on topological distance to bypass N^2 cost.
+    """
+    G = nx.from_numpy_array(adjacency)
+    all_pairs = {}
+
+    # 1. Direct Neighbors (Dist 1)
+    edges = list(G.edges())
+    n_d1 = config.get("n_dist1", 1000)
+    # Sample if we have more edges than requested
+    if len(edges) > n_d1:
+        all_pairs["dist1"] = random.sample(edges, n_d1)
+    else:
+        all_pairs["dist1"] = edges
+
+    # 2. Dist 2 and Dist 3+ (BFS sampling)
+    nodes = list(G.nodes())
+    n_d2 = config.get("n_dist2", 1000)
+    n_d3 = config.get("n_dist3", 1000)
+
+    d2_found, d3_found = [], []
+    attempts = 0
+    max_attempts = (n_d2 + n_d3) * 100  # Safety break
+
+    while (len(d2_found) < n_d2 or len(d3_found) < n_d3) and attempts < max_attempts:
+        u, v = random.sample(nodes, 2)
+        try:
+            d = nx.shortest_path_length(G, source=u, target=v)
+            if d == 2 and len(d2_found) < n_d2:
+                d2_found.append((u, v))
+            elif d >= 3 and len(d3_found) < n_d3:
+                d3_found.append((u, v))
+        except nx.NetworkXNoPath:
+            pass
+        attempts += 1
+
+    all_pairs["dist2"] = d2_found
+    all_pairs["dist3"] = d3_found
+
+    return all_pairs
+
+
+# ======================= Simulation Functions =======================
+
+
 def time_series(params):
     """
     Runs a full simulation and saves the trajectory.
@@ -81,14 +165,15 @@ def time_series(params):
 
     # Total steps (Time / dt)
     total_time_steps = int(params.get("total_time", 1000))
-
+    noise = float(params.get("noise", 0.1))
     # 2. Random State Init
     rng = default_rng(params.get("seed", None))
+    noise = params.get("noise", 0.0)
 
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + noise * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + noise * rng.standard_normal(n_nodes)
 
     # 3. Run
     full_data = evolve_system(
@@ -106,7 +191,10 @@ def time_series(params):
 
     transitory = int(params.get("transitory_time", total_time_steps * 0.1))
 
-    save_simulation_data(save_path, full_data[transitory:], graph_uuid)
+    with np.errstate(over="ignore"):
+        data_to_save = full_data[transitory:].astype(np.float32)
+
+    save_simulation_data(save_path, data_to_save, graph_uuid)
 
     return {}
 
@@ -121,10 +209,10 @@ def run_order_parameter(params):
     total_time_steps = int(params["total_time"])
 
     rng = default_rng(params.get("seed", None))
-
+    noise = params.get("noise", 0.0)
     # State Init
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
 
     # 2. Run
     traj = evolve_system(
@@ -148,8 +236,251 @@ def run_order_parameter(params):
 
     metrics = params.get("metrics", ["sync_error"])
     for m in metrics:
-        if m in AVAILABLE_METRICS:
+        if m in AVAILABLE_METRICS_ORDER_PARAMETER:
             # Metrics must handle (Time, Nodes) input
-            results[m] = AVAILABLE_METRICS[m](voltage_data)
+            results[m] = AVAILABLE_METRICS_ORDER_PARAMETER[m](voltage_data)
+
+    return results
+
+
+def research_alignment_worker(params):
+    """
+    Simulates FHN, loops over LAGS, computes Stratified TE vs Theory,
+    and returns flat research metrics. (RAM Optimized)
+    """
+    # 1. Setup
+    model, graph_uuid = common_worker_setup(params)
+
+    # We strictly need adjacency for sampling and theory
+    adj, _, _, _ = load_graph_topology(params["graph_file_path"])
+
+    # 2. Simulate (In-Memory)
+    total_time = int(params["total_time"])
+    rng = default_rng(params.get("seed", None))
+    n_nodes = params["number_of_nodes"]
+    noise = params.get("noise", 0.0)
+
+    State_0 = np.zeros((3, n_nodes), dtype=np.float64)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + noise * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + noise * rng.standard_normal(n_nodes)
+
+    traj = evolve_system(model, State_0, total_time, None, rk4_step)
+
+    # Extract Voltage (Post-Transitory)
+    start = int(params.get("transitory_time", 1000))
+    voltage_data = traj[start:, 0, :]
+
+    results = {
+        "epsilon": model.coupling_str,
+        "cr": model.c_r,
+        "fhn_eps": model.fhn_eps,
+        "graph_uuid": graph_uuid,
+    }
+
+    if not np.isfinite(voltage_data).all():
+        print(
+            f"!!! CRASH DETECTED: Simulation exploded for eps={model.coupling_str}, cr={model.c_r}"
+        )
+        # Return a 'failed' result so the runner doesn't crash
+        return {
+            "epsilon": model.coupling_str,
+            "cr": model.c_r,
+            "error": "Simulation exploded (NaN/Inf values), try to look at rk4 dt",
+        }
+
+    # Also check for empty/silent data (std dev approx 0)
+    var = np.std(voltage_data)
+    if var < 1e-9:
+        print(
+            f">>> SKIPPING TE: Fixed point detected (Std={var:.2e}) for cr={model.c_r}"
+        )
+
+        # Fill results with dummy zeros to keep the CSV valid
+        analysis_cfg = params.get("research_analysis", {})
+        lags = analysis_cfg.get("te_lags", [1])
+        metrics = analysis_cfg.get("metrics", ["kl_divergence"])
+
+        for tau in lags:
+            results[f"te_uncertainty_lag{tau}"] = 0.0
+            for m in metrics:
+                results[f"{m}_lag{tau}"] = (
+                    0.0  # KL 0 means perfect alignment (trivial), or just 0 info
+                )
+
+        return results
+
+    # 3. Analyze
+    analysis_cfg = params.get("research_analysis", {})
+    if not analysis_cfg.get("active", False):
+        return {"error": "Research analysis inactive in config"}
+
+    # A. Get Pairs
+    pairs_dict = get_stratified_pairs(adj, analysis_cfg["stratified_sampling"])
+
+    # B. Loop over Lags (Flattening dimensions)
+    lags_to_test = analysis_cfg.get("te_lags", [1])
+
+    n_real = analysis_cfg.get("n_real", 1)
+
+    for tau in lags_to_test:
+        L_exp = expm(-model.coupling_op * model.dt * tau)
+
+        measured_means = []
+        measured_stds = []
+        theory_vals = []
+
+        for group, pairs in pairs_dict.items():
+            for u, v in pairs:
+                x = prepare_data(voltage_data[:, u])
+                y = prepare_data(voltage_data[:, v])
+
+                # Pass n_real to the optimized measure function
+                val_means, val_stds = compute_te_over_lags(
+                    x,
+                    y,
+                    [tau],
+                    n_real=n_real,
+                    n_eff=analysis_cfg["n_eff"],
+                    kNN=analysis_cfg["kNN"],
+                    verbose=False,
+                )
+
+                measured_means.append(val_means[0])
+                measured_stds.append(val_stds[0])
+                theory_vals.append(L_exp[u, v])
+
+        # Convert to arrays and Compute Metrics
+        vec_means = np.array(measured_means)
+        vec_stds = np.array(measured_stds)
+        vec_theory = np.array(theory_vals)
+
+        # Save uncertainty metric (Good for error bars in plots later)
+        results[f"te_uncertainty_lag{tau}"] = np.mean(vec_stds)
+
+        # Compute Metrics using the ROBUST MEAN
+        requested_metrics = analysis_cfg.get("metrics", ["kl_divergence"])
+        for metric_name in requested_metrics:
+            if metric_name in RESEARCH_METRICS:
+                score = RESEARCH_METRICS[metric_name](vec_means, vec_theory)
+                results[f"{metric_name}_lag{tau}"] = score
+
+    return results
+
+
+def raw_te_propagator(params):
+    """
+    New Simulation Mode: 'raw_te_propagator'
+
+    Goal:
+        Perform a 'Link-by-Link' analysis to find the Transfer Function.
+        Simulates the system and saves the raw vectors:
+        X = Theoretical Propagator (exp(-L*tau))
+        Y = Measured Transfer Entropy
+
+    Output:
+        Saves one .npz file per lag in the output folder.
+    """
+    # 1. Setup
+    model, graph_uuid = common_worker_setup(params)
+    adj, _, _, _ = load_graph_topology(params["graph_file_path"])
+
+    # 2. Simulate
+    total_time = int(params["total_time"])
+    rng = default_rng(params.get("seed", 1234567890))
+    n_nodes = params["number_of_nodes"]
+    noise = params.get("noise", 0.0)
+
+    State_0 = np.zeros((3, n_nodes), dtype=np.float64)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + noise * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + noise * rng.standard_normal(n_nodes)
+
+    print(f"[Raw_TE] Starting Simulation (T={total_time})...")
+    traj = evolve_system(model, State_0, total_time, None, rk4_step)
+
+    # Extract Voltage (Post-Transitory)
+    start = int(params.get("transitory_time", 1000))
+    voltage_data = traj[start:, 0, :]
+
+    # Safety Checks
+    if not np.isfinite(voltage_data).all():
+        print("CRASH: Simulation exploded.")
+        return {"error": "Exploded"}
+    if np.std(voltage_data) < 1e-9:
+        print("ABORT: Fixed point detected.")
+        return {"error": "Fixed point"}
+
+    # 3. Analyze Link-by-Link
+    analysis_cfg = params.get("research_analysis", {})
+
+    # We use stratified sampling to get a representative cloud of points
+    pairs_dict = get_stratified_pairs(adj, analysis_cfg.get("stratified_sampling", {}))
+
+    lags_to_test = analysis_cfg.get("te_lags", [50, 100])  # Default to 100 if missing
+    n_real = analysis_cfg.get("n_real", 10)
+
+    output_folder = params.get("output_folder", "Data_output")
+
+    results = {
+        "epsilon": model.coupling_str,
+        "cr": model.c_r,
+        "status": "Saved Scatter Data",
+    }
+
+    for tau in lags_to_test:
+        print(f"[Raw_TE] Processing Lag {tau}...")
+
+        # A. Theoretical Propagator
+        if params.get("diffusive_operator", "Diffusive") == "Laplacian":
+            L_effective = model.coupling_op
+        else:
+            Identity = np.eye(model.coupling_op.shape[0])
+            L_effective = Identity - model.coupling_op
+
+        matrix_exponent = -model.coupling_str * L_effective * (tau * model.dt)
+        L_exp = expm(matrix_exponent)
+
+        measured_means = []
+        measured_stds = []
+        theory_vals = []
+
+        # B. Measure TE for every pair
+        for group, pairs in pairs_dict.items():
+            for u, v in pairs:
+                x = prepare_data(voltage_data[:, u])
+                y = prepare_data(voltage_data[:, v])
+
+                val_means, val_stds = compute_te_over_lags(
+                    x,
+                    y,
+                    [tau],
+                    n_real=n_real,
+                    n_eff=analysis_cfg.get("n_eff", 4096),
+                    kNN=analysis_cfg.get("kNN", 5),
+                    verbose=False,
+                )
+                measured_means.append(val_means[0])
+                measured_stds.append(val_stds[0])
+                theory_vals.append(L_exp[u, v])
+
+        # C. Save Raw Data
+        vec_means = np.array(measured_means)
+        vec_stds = np.array(measured_stds)
+        vec_theory = np.array(theory_vals)
+
+        scatter_filename = f"scatter_eps{model.coupling_str}_cr{model.c_r}_lag{tau}.npz"
+        scatter_path = os.path.join(output_folder, scatter_filename)
+
+        np.savez(
+            scatter_path,
+            theory=vec_theory,
+            te=vec_means,
+            te_std=vec_stds,
+            meta=np.array([model.coupling_str, model.c_r, tau]),
+        )
+        print(f"   -> Saved: {scatter_filename}")
+
+        results[f"file_lag{tau}"] = scatter_filename
 
     return results
