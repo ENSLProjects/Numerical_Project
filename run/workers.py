@@ -238,7 +238,7 @@ def run_order_parameter(params):
     for m in metrics:
         if m in AVAILABLE_METRICS_ORDER_PARAMETER:
             # Metrics must handle (Time, Nodes) input
-            results[m] = AVAILABLE_METRICS_ORDER_PARAMETER[m](voltage_data)
+            results[m] = AVAILABLE_METRICS_ORDER_PARAMETER[m](voltage_data,params)
 
     return results
 
@@ -356,6 +356,7 @@ def research_alignment_worker(params):
 
         # Save uncertainty metric (Good for error bars in plots later)
         results[f"te_uncertainty_lag{tau}"] = np.mean(vec_stds)
+        results[f"te_value_lag{tau}"] = np.mean(vec_means)
 
         # Compute Metrics using the ROBUST MEAN
         requested_metrics = analysis_cfg.get("metrics", ["kl_divergence"])
@@ -365,3 +366,5 @@ def research_alignment_worker(params):
                 results[f"{metric_name}_lag{tau}"] = score
 
     return results
+
+

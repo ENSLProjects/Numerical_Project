@@ -151,7 +151,7 @@ def create_experiment_config(experiment_name, **kwargs):
 
 
 if __name__ == "__main__":
-    create_experiment_config(
+    '''create_experiment_config(
         "paper_config_for_CS",
         mode="run_order_parameter",
         quick_analyze_graph=False,
@@ -163,7 +163,7 @@ if __name__ == "__main__":
         epsilon=[0.01],
         std=0.9,
     )
-
+'''
     create_experiment_config(   
         "simulation_optimal_linear_cr_epsilon",
         mode="research_alignment",
@@ -179,15 +179,15 @@ if __name__ == "__main__":
         research_analysis={
             "active": True,
             # Minimal lags to find the minimum quickly
-            "te_lags": [1, 2, 3, 4, 5, 10, 15, 20, 30, 40, 50, 100, 200, 500],
+            "te_lags": [1, 2, 3, 4, 5, 6, 15, 20, 30, 40, 50, 100, 200, 500],
             # Fast/Coarse settings
-            "n_real": 50,
+            "n_real": 10,
             "n_eff": 4096,
             "kNN": 5,
             # Light sampling (200 pairs per distance)
-            "stratified_sampling": {"n_dist1": 2000, "n_dist2": 2000, "n_dist3": 2000},
+            "stratified_sampling": {"n_dist1": 20, "n_dist2": 20, "n_dist3": 20},
             # We only need KL to find the "Goldilocks Zone"
             "metrics": ["kl_divergence", "cca_alignment"],
         },
-        existing_graph_path="Data_output/graphs_registry/graph_N1000_std0.9_c267b0d5.npz",
+        #existing_graph_path="Data_output/graphs_registry/graph_N1000_std0.9_c267b0d5.npz",
     )

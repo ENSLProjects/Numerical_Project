@@ -22,4 +22,10 @@ epsilon: [0.01]
 metrics: [COH, OSC, FMSD]
 cr: 0.4
 threshold: 0.8
-existing_graph_path: Data_output/graphs_registry/graph_N1000_std0.9_2851cce4.npz
+research_analysis:
+  active: false
+  te_lags: [1, 5, 10]
+  stratified_sampling: {n_dist1: 1000, n_dist2: 1000, n_dist3: 1000}
+  kNN: 5
+  n_eff: 4096
+existing_graph_path: Data_output/graphs_registry/graph_N1000_std0.9_b34b7477.npz
