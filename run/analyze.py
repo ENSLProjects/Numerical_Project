@@ -356,6 +356,7 @@ def plot_simulation_graph(file_path):
     ax.axis("off")  # Hide axis
     plt.legend(loc="upper right")
     plt.tight_layout()
+    plt.savefig("Poster/fullgraph.png")
     plt.show()
 
 
@@ -429,7 +430,16 @@ def animate_simulation(file_path, fps=30, steps_per_second=2000):
     ani = animation.FuncAnimation(
         fig, update, frames=n_frames, interval=int(1000 / fps), blit=False, repeat=True
     )
+    # --- NEW SAVING BLOCK ---
+    output_filename = "Poster/timeseriesvideo.mp4"
+    print(f"Saving animation to {output_filename}...")
 
+    # You need ffmpeg installed for mp4. If not, use 'pillow' for .gif
+    writer = animation.FFMpegWriter(fps=fps, metadata=dict(artist="Me"), bitrate=1800)
+    ani.save(output_filename, writer=writer)
+
+    print("Done!")
+    # ------------------------
     plt.show()
     return ani
 

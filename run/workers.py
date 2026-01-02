@@ -324,7 +324,7 @@ def research_alignment_worker(params):
     n_real = analysis_cfg.get("n_real", 1)
 
     for tau in lags_to_test:
-        L_exp = expm(-model.coupling_op * model.dt * tau)
+        L_exp = expm(-model.coupling_op * model.dt * tau * model.coupling_str)
 
         measured_means = []
         measured_stds = []

@@ -82,7 +82,7 @@ def create_experiment_config(experiment_name, **kwargs):
         "mode": "sweep",  # "sweep", "time_series", or "research_alignment"
         "output_file": f"results_{experiment_name}.csv",
         "parallel": True,
-        "cores_ratio": 0.8,
+        "cores_ratio": 0.5,
         "output_folder": "Data_output",
         "seed": 1234567890,
         "quick_analyze_graph": False,
@@ -150,27 +150,14 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(
-        "try_raw_te_propagator",
-        mode="te_propagator",
+        "poster_experiment",
+        mode="time_series",
         quick_analyze_graph=False,
         parallel=True,
-        cores_ratio=0.6,
-        cr=0.495,
+        cr=[0.495, 0.5, 1.0],
         total_time=100000,
         transitory_time=1000,
         mean_poisson=0.7,
-        epsilon=0.012,
+        epsilon=[0.01, 0.1, 1.0],
         std=0.9,
-        research_analysis={
-            "active": True,
-            # Minimal lags to find the minimum quickly
-            "te_lags": [50, 100, 200],
-            # Fast/Coarse settings
-            "n_real": 10,
-            "n_eff": 4096,
-            "kNN": 5,
-            # Light sampling (200 pairs per distance)
-            "stratified_sampling": {"n_dist1": 500, "n_dist2": 500, "n_dist3": 500},
-        },
-        existing_graph_path="Data_output/graphs_registry/graph_N1000_std0.9_c267b0d5.npz",
     )

@@ -192,20 +192,20 @@ def compute_te_over_lags(
     n_real=10,
     n_eff=4096,
     kNN=5,
-    embedding=(2, 2),
-    Theiler_correction=1,
+    embedding=(1, 1),
+    Theiler_correction=4,
     verbose=True,
 ):
     """
     Computes TE over a range of lags.
     OPTIMIZED: Uses the C-library's internal 'N_real' for fast statistical error estimation.
     """
-    means = np.zeros(len(lags))
-    stds = np.zeros(len(lags))
+    val = np.zeros(len(lags))
+    stds = np.zeros((len(lags), 2))
 
-    if np.std(x) < 1e-6 or np.std(y) < 1e-6:
+    if np.std(x) < 1e-6 and np.std(y) < 1e-6:
         # Return zeros immediately. Do not touch the C-library.
-        return means, stds
+        return val, stds
 
     rng = np.random.default_rng()
 
@@ -221,35 +221,20 @@ def compute_te_over_lags(
     iterator = tqdm(lags) if verbose else lags
 
     for i, tau in enumerate(iterator):
-        # The C-library's internal N_real can be unstable on some architectures.
-        realizations = []
-        # To get a mean/std, we need to ask the library for N_real > 1 OR loop here.
-        for _ in range(max(1, n_real)):
-            val = ee.compute_TE(
-                x_c,
-                y_c,
-                n_embed_x=embedding[0],
-                n_embed_y=embedding[1],
-                stride=1,
-                lag=tau,
-                k=kNN,
-                N_eff=n_eff,
-                N_real=1,
-                Theiler=Theiler_correction,
-            )
-            # Handle case where it returns a list/tuple even for N_real=1
-            if isinstance(val, (list, tuple)):
-                realizations.append(val[0])
-            else:
-                realizations.append(val)
-        # Compute Stats manually
-        if n_real > 1:
-            means[i] = np.mean(realizations)
-            stds[i] = np.std(realizations)
-        else:
-            means[i] = realizations[0]
-            stds[i] = 0.0
-    return means, stds
+        val = ee.compute_TE(
+            x_c,
+            y_c,
+            n_embed_x=embedding[0],
+            n_embed_y=embedding[1],
+            stride=tau,
+            lag=tau,
+            k=kNN,
+            N_eff=n_eff,
+            N_real=1,
+            Theiler=Theiler_correction,
+        )[0]
+        stds[i] = ee.get_last_info()[0]
+    return val, stds
 
 
 def kuramoto_order(X, Y, N, t):
