@@ -13,6 +13,9 @@ from numba.experimental import jitclass
 # ======================= Helper Functions =======================
 
 
+
+
+
 def get_coupling_operator(adjacency: np.ndarray, type_diff: str) -> np.ndarray:
     """Pre-computes the normalized adjacency matrix.
     Run this ONCE in pure Python before the simulation.
@@ -255,8 +258,10 @@ def evolve_system(model, state_0, final_time, input_signal, stepper_func):
     current_state = state_0.copy()
     has_input = input_signal is not None
 
+    # On boucle sur le temps
     for t in range(final_time - 1):
-        u_in = input_signal[t] if has_input else 0.0
+
+        u_in = input_signal[t] 
 
         current_state = stepper_func(model, current_state, t * model.dt, u_in)
 

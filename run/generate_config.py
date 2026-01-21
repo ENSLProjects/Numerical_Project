@@ -15,7 +15,7 @@ from bnn_package import (
     add_passive_nodes,
     print_simulation_report,
 )
-
+ 
 
 # ======================= Functions
 
@@ -76,10 +76,10 @@ def create_experiment_config(experiment_name, **kwargs):
     """
     Creates a standardized .yaml config file for the runner.
     """
-    # 1. Base Template (Physics & Execution)
+
     template = {
         # --- EXECUTION ---
-        "mode": "sweep",  # "sweep", "time_series", or "research_alignment"
+        "mode": "sweep",  # "sweep", "time_series","run_order_parameter", "TE""
         "output_file": f"results_{experiment_name}.csv",
         "parallel": True,
         "cores_ratio": 0.8,
@@ -89,25 +89,33 @@ def create_experiment_config(experiment_name, **kwargs):
         # --- GRAPH ARCHITECTURE ---
         "number_of_nodes": 1000,
         "square_for_graph": [10.0, 10.0],
-        "diffusive_operator": "Laplacian",
-        "std": 1.0,
-        "mean_poisson": 3,
-        "noise": 0.05,
+        "diffusive_operator": "Laplacian",  # "Diffusive" or "Laplacian"
+        "std": 0.3,  # Connection radius (Gaussian sigma)
+        "mean_poisson": 0.7,  # Passive nodes per active node
         # --- PHYSICS (FHN Model) ---
-        "total_time": 300000,
-        "transitory_time": 10000,
+        "total_time": 300000,  # Total Steps
+        "transitory_time": 10000,  # Washout Steps
         "dt": 0.01,
-        "alpha": 0.2,
+        # --- INPUT SIGNAL PARAMETERS  ---
+        "input_active": True,       # Switch ON/OFF
+        "input_targets": 10,        # Nombre de noeuds au centre
+        "input_rate": 0.015,         
+        "input_magnitude": 0.5,     
+        "forced_targets" : [964,137,554,167,185,532,83,205,260,930,186,513,237],
+        # Model Parameters
+        "alpha": 0.2,  # Parameter alpha
         "a": 3.0,
-        "k": 0.25,
-        "vrp": 1.5,
-        "fhn_eps": 0.08,
+        "k": 0.25,  # Passive Coupling Strength
+        "vrp": 1.5,  # Resting Potential
+        "fhn_eps": 0.08,  # Time Scale Separation (Internal Physics)
         # --- SWEEP PARAMETERS ---
-        "epsilon": 0.1,
-        "metrics": ["sync_error"],
-        "cr": 1.0,
-        # --- RESEARCH ANALYSIS ---
-        # This block is only utilized if mode == "research_alignment"
+        "epsilon": 0.1,  # NETWORK COUPLING STRENGTH 
+        "metrics": ["COH","OSC","FMSD","Mean","Var"],
+        "cr": 1.0,  # Active/passive Coupling Strength
+        # ---Order Hyperparameters
+        "threshold" : 0.7,
+         # --- RESEARCH ANALYSIS ---
+        # This block is only utilized if mode == "research_alignment" or "TE"
         "research_analysis": {
             "active": False,
             "te_lags": [1, 5, 10],
@@ -116,12 +124,11 @@ def create_experiment_config(experiment_name, **kwargs):
             "n_eff": 4096,
         },
         # --- PROVENANCE ---
-        "existing_graph_path": None,
+        "existing_graph_path": None,  # Will be filled automatically
     }
 
     # 2. Override with User Arguments
     for key, value in kwargs.items():
-        # Handle nested research_analysis updates if provided as a dict
         if key == "research_analysis" and isinstance(value, dict):
             template["research_analysis"].update(value)
         else:
@@ -149,28 +156,16 @@ def create_experiment_config(experiment_name, **kwargs):
 
 
 if __name__ == "__main__":
-    create_experiment_config(
-        "try_raw_te_propagator",
-        mode="te_propagator",
+    create_experiment_config(   
+        "time_series",
+        mode= "time_series",
         quick_analyze_graph=False,
         parallel=True,
-        cores_ratio=0.6,
-        cr=0.495,
-        total_time=100000,
-        transitory_time=1000,
+        cores_ratio=0.5,
+        cr= 0.35,  
+        transitory_time=5000,
         mean_poisson=0.7,
-        epsilon=0.012,
-        std=0.9,
-        research_analysis={
-            "active": True,
-            # Minimal lags to find the minimum quickly
-            "te_lags": [50, 100, 200],
-            # Fast/Coarse settings
-            "n_real": 10,
-            "n_eff": 4096,
-            "kNN": 5,
-            # Light sampling (200 pairs per distance)
-            "stratified_sampling": {"n_dist1": 500, "n_dist2": 500, "n_dist3": 500},
-        },
-        existing_graph_path="Data_output/graphs_registry/graph_N1000_std0.9_c267b0d5.npz",
+        epsilon = 0.30,
+        std=0.5,
+        metrics=["TE","COH","OSC","FMSD","Mean","Var"],
     )
