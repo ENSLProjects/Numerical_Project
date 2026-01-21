@@ -296,9 +296,9 @@ def time_series(params):
     n_nodes = params["number_of_nodes"]
 
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + noise * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + noise * rng.standard_normal(n_nodes)
 
     # --- GENERATION INPUT ---
     input_signal = None
@@ -423,11 +423,12 @@ def research_alignment_worker(params):
     total_time = int(params["total_time"])
     rng = default_rng(params.get("seed", None))
     n_nodes = params["number_of_nodes"]
+    noise = params.get("noise", 0.0)
 
     State_0 = np.zeros((3, n_nodes), dtype=np.float64)
-    State_0[0] = 0.1 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[1] = 0.3 + 0.1 * rng.standard_normal(n_nodes)
-    State_0[2] = 1.0 + 0.1 * rng.standard_normal(n_nodes)
+    State_0[0] = 0.1 + noise * rng.standard_normal(n_nodes)
+    State_0[1] = 0.3 + noise * rng.standard_normal(n_nodes)
+    State_0[2] = 1.0 + noise * rng.standard_normal(n_nodes)
 
     traj = evolve_system(model, State_0, total_time, None, rk4_step)
  

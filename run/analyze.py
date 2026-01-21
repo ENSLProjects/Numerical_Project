@@ -14,6 +14,8 @@ import sys
 import os
 import re
 import pandas as pd
+from scipy.optimize import curve_fit
+import glob
 
 
 # ======================= Functions
@@ -513,25 +515,151 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=4000):
     return ani
 
 
+# ======================= 1. CURVE FITTING MODELS =======================
+
+
+def power_law(x, a, k, c):
+    """The Candidate Law: TE = a * (Propagator)^k + c"""
+    return a * np.power(x, k) + c
+
+
+def linear_model(x, a, b):
+    """The Linear Channel: TE = a * x + b"""
+    return a * x + b
+
+
+# ======================= 2. ANALYSIS MODES =======================
+
+
+def analyze_deep_dive(folder_path):
+    """
+    Scans folder for 'scatter_*.npz' and performs Curve Fitting + Binning.
+    """
+    print(f"\n>>> [Deep Dive] Scanning folder: {folder_path}")
+    files = glob.glob(os.path.join(folder_path, "scatter_*.npz"))
+
+    if not files:
+        print(f"Error: No 'scatter_*.npz' files found in {folder_path}")
+        return
+
+    print(f"    Found {len(files)} scatter files. Analyzing...")
+
+    for file_path in files:
+        try:
+            filename = os.path.basename(file_path)
+            data = np.load(file_path)
+
+            if "theory" in data and "te" in data:
+                x_theory, y_te = data["theory"], data["te"]
+            else:
+                print(f"    [Skip] {filename} missing keys.")
+                continue
+
+            # Filter Noise
+            mask = (x_theory > 1e-9) & (y_te > 1e-9)
+            x, y = x_theory[mask], y_te[mask]
+
+            if len(x) < 10:
+                print("    [Skip] Not enough data points.")
+                continue
+
+            # --- 1. CURVE FITTING ---
+            try:
+                popt_pow, _ = curve_fit(power_law, x, y, p0=[1, 2, 0], maxfev=5000)
+                k = popt_pow[1]
+            except Exception:
+                k, popt_pow = 0.0, [0, 0, 0]
+
+            # --- 2. BINNED STATISTICS (The Noise Killer) ---
+            # We split the x-axis (Propagator) into 15 bins and average the TE in each.
+            nbins = 15
+            bins = np.linspace(np.min(x), np.max(x), nbins + 1)
+            bin_centers = 0.5 * (bins[:-1] + bins[1:])
+            bin_means = []
+            bin_errs = []
+
+            for i in range(nbins):
+                # Find all points in this slice of X
+                idx = (x >= bins[i]) & (x < bins[i + 1])
+                if np.sum(idx) > 5:  # Only compute if enough samples
+                    mean_val = np.mean(y[idx])
+                    std_err = np.std(y[idx]) / np.sqrt(np.sum(idx))
+                    bin_means.append(mean_val)
+                    bin_errs.append(std_err)
+                else:
+                    bin_means.append(np.nan)
+                    bin_errs.append(np.nan)
+
+            bin_means = np.array(bin_means)
+            bin_errs = np.array(bin_errs)
+
+            # --- 3. PLOTTING ---
+            plt.figure(figsize=(10, 6))
+
+            # A. The Cloud (Raw)
+            plt.scatter(x, y, alpha=0.15, s=10, c="gray", label="Raw Pairs (Noise)")
+
+            # B. The Signal (Binned) - THE TRUTH
+            valid_bins = ~np.isnan(bin_means)
+            plt.errorbar(
+                bin_centers[valid_bins],
+                bin_means[valid_bins],
+                yerr=bin_errs[valid_bins],
+                fmt="o-",
+                color="green",
+                lw=2,
+                capsize=4,
+                label="Binned Average (Signal)",
+            )
+
+            # C. The Fits
+            x_sort = np.sort(x)
+            if k != 0:
+                plt.plot(
+                    x_sort,
+                    power_law(x_sort, *popt_pow),
+                    "r--",
+                    lw=2,
+                    label=f"Power Law ($k={k:.2f}$)",
+                )
+
+            plt.xlabel(r"Theoretical Propagator $(e^{-\mathcal{L}\tau})_{ij}$")
+            plt.ylabel("Transfer Entropy (TE)")
+            plt.title(
+                f"Structure-Function Relationship ({filename})\nExponent k={k:.4f}"
+            )
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            out_name = os.path.join(
+                folder_path, filename.replace(".npz", "_binned.png")
+            )
+            plt.savefig(out_name, dpi=300)
+            plt.close()
+
+            print(
+                f"    --> Saved Binned Plot: {os.path.basename(out_name)} (k={k:.4f})"
+            )
+
+        except Exception as e:
+            print(f"    [Error] {filename}: {e}")
+
+
+# ======================= 3. VISUALIZATION FUNCTIONS (CSV) =======================
+
+
 def parse_columns(df):
-    """
-    Extracts metrics and lags from column names.
-    Returns: dict { 'metric_name': { lag: column_name } }
-    """
+    """Extracts metrics and lags from column names."""
     metrics = {}
-
     pattern = re.compile(r"(.+)_lag(\d+)$")
-
     for col in df.columns:
         match = pattern.match(col)
         if match:
             name = match.group(1)
             lag = int(match.group(2))
-
             if name not in metrics:
                 metrics[name] = {}
             metrics[name][lag] = col
-
     return metrics
 
 
@@ -542,7 +670,6 @@ def plot_phase_scan(df, metrics_map, output_prefix):
     print(">>> Detected PHASE SCAN mode (Multiple Epsilons).")
 
     df = df.sort_values(by="epsilon")
-
     for metric_name, lag_dict in metrics_map.items():
         plt.figure(figsize=(10, 6))
 
@@ -554,13 +681,10 @@ def plot_phase_scan(df, metrics_map, output_prefix):
         plt.xscale("log")
         plt.xlabel(r"Coupling Strength $\epsilon$")
         plt.ylabel(metric_name.replace("_", " ").title())
-        plt.title(f"Phase Scan: {metric_name} vs Coupling")
-        plt.grid(True, which="both", linestyle="--", alpha=0.5)
+        plt.title(f"Phase Scan: {metric_name}")
+        plt.grid(True, linestyle="--", alpha=0.5)
         plt.legend()
-
-        outfile = f"{output_prefix}_{metric_name}_scan.png"
-        plt.savefig(outfile, dpi=300)
-        print(f"Saved: {outfile}")
+        plt.savefig(f"{output_prefix}_{metric_name}_scan.png", dpi=300)
         plt.close()
 
 
@@ -595,32 +719,19 @@ def plot_time_evolution(df, metrics_map, output_prefix):
             elif "kl" in metric_name.lower():
                 plt.axhline(0.0, color="black", linestyle="--", label="Zero Divergence")
 
-            plt.xlabel("Lag $\\tau$ (Time Steps)")
+            plt.xlabel("Lag $\\tau$")
             plt.ylabel(metric_name.replace("_", " ").title())
-            plt.title(rf"Structural-Functional Alignment over Time\n($\epsilon={eps}$)")
+            plt.title(rf"Dynamics over Time ($\epsilon={eps}$)")
             plt.grid(True, alpha=0.3)
             plt.legend()
-
-            outfile = f"{output_prefix}_{metric_name}_eps{eps}_evolution.png"
-            plt.savefig(outfile, dpi=300)
-            print(f"Saved: {outfile}")
+            plt.savefig(
+                f"{output_prefix}_{metric_name}_eps{eps}_evolution.png", dpi=300
+            )
             plt.close()
 
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python plot_results.py <path_to_results.csv>")
-        sys.exit(1)
-
-    csv_path = sys.argv[1]
-    if not os.path.exists(csv_path):
-        print(f"Error: File {csv_path} not found.")
-        sys.exit(1)
-
+def analyze_csv(csv_path):
     df = pd.read_csv(csv_path)
-    print(f"Loaded {len(df)} rows from {csv_path}")
-
-    # 1. Parse Columns to find what data we have
     metrics_map = parse_columns(df)
     if not metrics_map:
         print("Error: No 'metric_lagX' columns found in CSV.")
@@ -629,7 +740,6 @@ def main():
     # 2. Determine Plot Mode
 
     unique_eps = df["epsilon"].nunique() if "epsilon" in df.columns else 0
-
     output_prefix = os.path.splitext(csv_path)[0]
 
     if unique_eps > 3:

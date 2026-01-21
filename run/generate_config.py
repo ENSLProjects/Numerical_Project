@@ -157,7 +157,7 @@ def create_experiment_config(experiment_name, **kwargs):
 
 if __name__ == "__main__":
     create_experiment_config(   
-        "measure_TE_sweep",
+        "time_series",
         mode= "time_series",
         quick_analyze_graph=False,
         parallel=True,

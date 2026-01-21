@@ -10,7 +10,7 @@ from scipy.signal import hilbert
 import networkx as nx
 from tabulate import tabulate
 import time
-import entropy.entropy as ee
+#import entropy.entropy as ee
 from tqdm import tqdm
 #from sklearn.cross_decomposition import CCA
 
@@ -89,7 +89,6 @@ def MSD(G, X, order: str, average=True, axe=1):
         raise ValueError(
             f"the way to compute MSD is either 'right' for std+mean or 'left' for mean+std but {order} was given"
         )
-
 
 
 
