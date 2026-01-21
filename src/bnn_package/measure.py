@@ -6,12 +6,13 @@
 import numpy as np
 import numba
 from scipy.spatial.distance import pdist  # noqa: F401
+from scipy.signal import hilbert
 import networkx as nx
 from tabulate import tabulate
 import time
 import entropy.entropy as ee
 from tqdm import tqdm
-from sklearn.cross_decomposition import CCA
+#from sklearn.cross_decomposition import CCA
 
 
 # ======================= Functions
@@ -132,12 +133,10 @@ def print_simulation_report(adj_matrix, fast_mode=False):
             diameter = "Inf"
 
         # Betweenness (The expensive part)
-        # We only take the max value to keep the table clean
         bet_dict = nx.betweenness_centrality(G)
         max_betweenness = f"{max(bet_dict.values()):.4f}"
 
     # 5. Prepare Data for Tabulate
-    # We create a list of lists
     table_data = [
         ["Metric", "Value", "Description"],
         ["Edges (E)", int(num_edges), "Total Connections"],
@@ -171,103 +170,77 @@ def compute_te_over_lags(
     n_real=10,
     n_eff=4096,
     kNN=5,
-    embedding=(2, 2),
-    Theiler_correction=1,
+    embedding=(1, 1),
+    Theiler_correction=4,
     verbose=True,
 ):
     """
     Computes TE over a range of lags.
     OPTIMIZED: Uses the C-library's internal 'N_real' for fast statistical error estimation.
     """
-    means = np.zeros(len(lags))
-    stds = np.zeros(len(lags))
+    val = np.zeros(len(lags))
+    std = np.zeros(len(lags))
 
-    if np.std(x) < 1e-6 or np.std(y) < 1e-6:
-        # Return zeros immediately. Do not touch the C-library.
-        return means, stds
+    if np.std(x) < 1e-6 and np.std(y) < 1e-6:
+        return val, std
 
-    rng = np.random.default_rng()
 
-    # Add noise BEFORE reordering to prevend the TE being strictly zero
-    x_noisy = x + epsilon_noise * rng.standard_normal(x.shape)
-    y_noisy = y + epsilon_noise * rng.standard_normal(y.shape)
 
-    x_c = np.ascontiguousarray(x_noisy, dtype=np.float64)
-    y_c = np.ascontiguousarray(y_noisy, dtype=np.float64)
+    x_c = np.ascontiguousarray(x, dtype=np.float64)
+    y_c = np.ascontiguousarray(y, dtype=np.float64)
 
     ee.set_verbosity(1 if verbose else 0)
 
     iterator = tqdm(lags) if verbose else lags
 
     for i, tau in enumerate(iterator):
-        # The C-library's internal N_real can be unstable on some architectures.
-        realizations = []
-        # To get a mean/std, we need to ask the library for N_real > 1 OR loop here.
-        for _ in range(max(1, n_real)):
-            val = ee.compute_TE(
-                x_c,
-                y_c,
-                n_embed_x=embedding[0],
-                n_embed_y=embedding[1],
-                stride=1,
-                lag=tau,
-                k=kNN,
-                N_eff=n_eff,
-                N_real=1,
-                Theiler=Theiler_correction,
-            )
-            # Handle case where it returns a list/tuple even for N_real=1
-            if isinstance(val, (list, tuple)):
-                realizations.append(val[0])
-            else:
-                realizations.append(val)
-        # Compute Stats manually
-        if n_real > 1:
-            means[i] = np.mean(realizations)
-            stds[i] = np.std(realizations)
-        else:
-            means[i] = realizations[0]
-            stds[i] = 0.0
-    return means, stds
+        
+        val[i] = ee.compute_TE(
+            x_c,
+            y_c,
+            stride=5,
+            lag=tau,
+            k=kNN,
+            N_eff=n_eff,
+            N_real=n_real,
+            Theiler=Theiler_correction,
+        )[0]
+        std[i] = ee.get_last_info()[0]
+            
+
+    return val, std
 
 
 
 
 
 def compute_kl_divergence(p_vec, q_vec):
-    """Kullback-Leibler Divergence: D(P || Q)"""
-    # Theoretical Correction: TE cannot be negative
-    # Negative values are estimator bias/noise when True TE approx 0.
-    # We clip them to 0 (plus epsilon for log stability).
+    """Kullback-Leibler Divergence: D(P || Q)
+     Theoretical Correction: TE cannot be negative
+     Negative values are estimator bias/noise when True TE approx 0."""
+
     p_vec = np.maximum(p_vec, 0.0)
     q_vec = np.maximum(q_vec, 0.0)
 
     p_sum = np.sum(p_vec)
     q_sum = np.sum(q_vec)
 
-    # Handle empty/silent systems
+
     if p_sum == 0 or q_sum == 0:
         return 0.0
 
     p = p_vec / p_sum
     q = q_vec / q_sum
 
-    # 3. Compute KL with epsilon stability
-    # We add epsilon INSIDE the log to prevent log(0)
+
     epsilon = 1e-15
 
     return np.sum(p * np.log((p + epsilon) / (q + epsilon)))
 
 
-def compute_cca_score(p_vec, q_vec):
-    """Canonical Correlation Analysis (1D Approximation for samples)"""
-    cca = CCA(n_components=1)
-    X_c, Y_c = cca.fit_transform(p_vec.reshape(-1, 1), q_vec.reshape(-1, 1))
-    return np.corrcoef(X_c.T, Y_c.T)[0, 1]
-
 # ------- The order parameters -------------
 
-def detect_oscillating_nodes(X, params, min_power=1.0e8, f_min=0.01):
+def detect_oscillating_nodes(X, params, min_power=1.0e8, f_min=0.0001):
     """
     Détection d'oscillations via FFT (Fast Fourier Transform).
     
@@ -296,34 +269,28 @@ def detect_oscillating_nodes(X, params, min_power=1.0e8, f_min=0.01):
 
     fft_spectrum = np.fft.rfft(X_centered, axis=0)
     
-    # 3. Calculer le spectre de puissance (Power Spectrum)
+    #  Calculer le spectre de puissance (Power Spectrum)
     power_spectrum = np.abs(fft_spectrum)**2
     
-    # 4. Obtenir les fréquences correspondantes aux indices de la FFT
+    #  Obtenir les fréquences correspondantes aux indices de la FFT
     freqs = np.fft.rfftfreq(n_time, d=dt)
     
-    # --- FILTRAGE DES BASSES FRÉQUENCES ---
-    # On ignore les fréquences très basses (drift lent)
     valid_idx = freqs >= f_min
     
-
     restricted_power = power_spectrum[valid_idx, :]
     restricted_freqs = freqs[valid_idx]
     
     if restricted_power.shape[0] == 0:
-        # Cas extrême où tout est sous f_min
         return np.zeros(n_nodes, dtype=bool), np.zeros(n_nodes)
 
-    # 5. Trouver le pic (fréquence dominante) pour chaque noeud
-    # argmax retourne l'indice du pic dans la dimension restreinte
+    #  Trouver le pic (fréquence dominante) pour chaque noeud
     peak_indices = np.argmax(restricted_power, axis=0)
     
-    # Récupérer la puissance max et la fréquence correspondante
+
     max_powers = restricted_power[peak_indices, np.arange(n_nodes)]
     peak_freqs = restricted_freqs[peak_indices]
     
-    # 6. Décision : Oscillant ou Bruit ?
-    # Si le pic de puissance est trop faible, c'est juste du bruit de fond
+    #  Décision : Oscillant ou Bruit ?
     is_osc = max_powers > min_power
     
     # Mettre à NaN ou 0 les fréquences des non-oscillants
@@ -333,37 +300,59 @@ def detect_oscillating_nodes(X, params, min_power=1.0e8, f_min=0.01):
     return is_osc, final_freqs
 
 def COH(Trajectory, params):
-    threshold = params.get("threshold", 0.0)  # par ex. 0.0 comme défaut
-    frac_active = (Trajectory >= threshold).mean(axis=1)   # (n_time,)
-    F = np.percentile(frac_active, 95.0)  # max sur le temps de la fraction de neurones "actifs"
+    ''' fraction of nodes that spike together once '''
+    threshold = params.get("threshold", 0.0) 
+    frac_active = (Trajectory >= threshold).mean(axis=1)   
+    F = np.percentile(frac_active, 95.0)  
     return float(F)
 
 def OSC(Trajectory, params):
+    '''Fraction of of oscilating nodes'''
     dt = params["dt"]
     is_osc, _ = detect_oscillating_nodes(Trajectory, params)
     osc_fraction = np.mean(is_osc) 
     return osc_fraction
 
 def FMSD(Trajectory, params):
-    # 1. Récupérer paramètres temporels
+
+    '''Ecart-type des fréquences des noeuds oscillants'''
 
     dt = params["dt"]
-    
-
-
-    # 3. Détection
     is_osc, freq = detect_oscillating_nodes(Trajectory, params)
 
-    # Sécurité si rien n'oscille
     if not np.any(is_osc):
         return 0.0
 
     freq_use = freq[is_osc]       
     sigma_nu = np.std(freq_use)
 
-
-        
     return sigma_nu
+
+
+
+def CRITICALITY_CORRELATION_MEAN(Trajectory,params):
+
+    dt = params['dt']
+
+    correlation_matrix = np.corrcoef(Trajectory, rowvar=False)
+
+    upper_tri_indices = np.triu_indices_from(correlation_matrix, k=1)
+    correlation_values = correlation_matrix[upper_tri_indices]
+
+    return np.mean(correlation_values)
+
+def CRITICALITY_CORRELATION_VAR(Trajectory,params):
+
+    dt = params['dt']
+
+    correlation_matrix = np.corrcoef(Trajectory, rowvar=False)
+    
+
+    upper_tri_indices = np.triu_indices_from(correlation_matrix, k=1)
+    correlation_values = correlation_matrix[upper_tri_indices]
+    
+
+    return np.var(correlation_values)
 
 # --- THE REGISTRY ---
 
@@ -371,11 +360,12 @@ AVAILABLE_METRICS_ORDER_PARAMETER = {
     "COH": COH,
     "OSC": OSC,
     "FMSD": FMSD,
+    "Mean" : CRITICALITY_CORRELATION_MEAN,
+    "Var" : CRITICALITY_CORRELATION_VAR,
     # Add
 }
 
 
 RESEARCH_METRICS = {
-    "kl_divergence": compute_kl_divergence,
-    "cca_alignment": compute_cca_score,
+    "kl_divergence": compute_kl_divergence
 }

@@ -194,6 +194,67 @@ def add_passive_nodes(G, f, rng):
     return new_G, N_p
 
 
+
+
+def generate_poisson_input(
+    n_nodes: int,
+    final_time: int,
+    dt: float,
+    coordinates: np.ndarray = None,   
+    n_targets: int = 10,
+    rate_hz: float = 5.0,
+    magnitude: float = 1.0,
+    pulse_duration: float = 30.0,    
+    forced_targets: np.ndarray = None 
+):
+    """
+    Génère UN SEUL signal Poisson (synchronisé) et l'applique à toutes les cibles.
+    """
+
+    # --- 1. CHOIX DES CIBLES ---
+    rng = 1
+    target_indices = None
+    if forced_targets is not None:
+        actual_n = min(len(forced_targets), n_targets)
+        target_indices = forced_targets[:actual_n]
+        print(f"Input : Cibles forcées (Topologie/Hubs) -> {target_indices}")
+    elif coordinates is not None:
+        try:
+            centroid = np.mean(coordinates, axis=0)
+            distances = np.linalg.norm(coordinates - centroid, axis=1)
+            sorted_indices = np.argsort(distances)
+            target_indices = sorted_indices[:n_targets]
+            print(f"Input : Cibles géométriques (Centre Spatial) -> {target_indices}")
+        except Exception as e:
+            print(f"Warning: Erreur calcul géométrique ({e}). Passage en aléatoire.")
+
+    if target_indices is None:
+        print("Input : Cibles aléatoires.")
+        target_indices = np.random.choice(n_nodes, n_targets, replace=False)
+
+    # --- 2. PRÉPARATION TEMPORELLE ---
+    pulse_steps = int(pulse_duration / dt)
+    if pulse_steps < 1: pulse_steps = 1
+    lam = rate_hz * dt 
+
+    # --- 3. GÉNÉRATION UNIQUE ---
+    input_signal = np.zeros((final_time, n_nodes), dtype=np.float64)
+
+    # A. Generate poisson spike train
+    single_spike_train = np.random.poisson(lam=lam, size=final_time)
+
+    # B. Convolve with pulse shape
+    kernel = np.ones(pulse_steps) * magnitude
+    convolved_signal = np.convolve(single_spike_train, kernel, mode='full')
+
+    # Cut to simulation end
+    final_signal_1d = convolved_signal[:final_time]
+
+    # C. Apply to target nodes
+    input_signal[:, target_indices] = final_signal_1d[:, np.newaxis]
+
+    return input_signal, target_indices
+
 ############## NEXT STEPS
 # ---- connect component check make the generated adjacency matrix connected
 # ---- add heterogeneity

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 from .buildgraph import (
+    generate_poisson_input,
     pos_nodes_uniform,
     norm_multi,
     local_connect_gaussian,
@@ -36,12 +37,14 @@ from .measure import (
     find_settling_time,
     print_simulation_report,
     compute_te_over_lags,
+    detect_oscillating_nodes,
     AVAILABLE_METRICS_ORDER_PARAMETER,
     RESEARCH_METRICS,
 )
 
 __all__ = [
     # Graph Building
+    "generate_poisson_input",
     "pos_nodes_uniform",
     "norm_multi",
     "local_connect_gaussian",
@@ -71,6 +74,7 @@ __all__ = [
     "find_settling_time",
     "print_simulation_report",
     "compute_te_over_lags",
+    "detect_oscillating_nodes",
     "AVAILABLE_METRICS_ORDER_PARAMETER",
     "RESEARCH_METRICS",
 ]

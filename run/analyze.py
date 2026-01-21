@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from pathlib import Path
 from scipy.spatial import KDTree
-from bnn_package import load_simulation_data, prepare_data, compute_te_over_lags
+from bnn_package import load_simulation_data, prepare_data, compute_te_over_lags, detect_oscillating_nodes
 import sys
 import os
 import re
@@ -60,7 +60,7 @@ def measure_te(file_path):
     N_real = 5  # number of subsets, for 20 the std is already of order 1e-16
     # ------------- data
 
-    # ee.get_sampling(verbosity=1)
+ 
 
     LAGS = np.arange(1, 10001, 50, dtype=int)
 
@@ -115,9 +115,8 @@ def plot_simulation_nodes(file_path, target_nodes):
     Plots the voltage evolution for a given set of nodes.
     Correctly handles shape (Time, Variables, Nodes).
     """
-    # 1. Load Data
+
     try:
-        # Load trajectory (and skip graph structure for speed)
         data = load_simulation_data(file_path, graph=False)
     except FileNotFoundError as e:
         print(f"Error: {e}")
@@ -127,22 +126,18 @@ def plot_simulation_nodes(file_path, target_nodes):
     params = data["parameters"]
     graph_uuid = data.get("graph_uuid", "unknown")
 
-    # 2. Detect & Parse Dimensions
-    # Workers.py defines state as (3, n_nodes), so trajectory is (Time, 3, n_nodes)
+
     shape = trajectory.shape
 
     if len(shape) == 3:
-        # Check which dimension is likely the variables (usually 3)
         if shape[1] == 3 and shape[2] != 3:
-            # Shape: (Time, Variables, Nodes) -> The scenario defined in workers.py
             n_steps, n_vars, n_nodes_total = shape
 
-            # Helper to extract voltage (Variable 0) for a specific node
             def get_voltage(traj, node_idx):
                 return traj[:, 0, node_idx]
 
         elif shape[2] == 3 and shape[1] != 3:
-            # Shape: (Time, Nodes, Variables) -> The scenario in analyze.py
+
             n_steps, n_nodes_total, n_vars = shape
 
             def get_voltage(traj, node_idx):
@@ -158,11 +153,10 @@ def plot_simulation_nodes(file_path, target_nodes):
         print(f"Error: Unexpected data shape {shape}. Expected 3 dimensions.")
         return
 
-    # 3. Construct Time Axis
+
     dt = float(params.get("dt", 0.01))
     time_axis = np.arange(n_steps) * dt
 
-    # 4. Plotting
     plt.figure(figsize=(10, 6))
 
     for node in target_nodes:
@@ -174,12 +168,11 @@ def plot_simulation_nodes(file_path, target_nodes):
                 f"Warning: Node {node} is out of bounds (Total nodes: {n_nodes_total})"
             )
 
-    # 5. Styling
+
     plt.title(f"Time Series Evolution\nGraph UUID: {graph_uuid} | dt: {dt}")
     plt.xlabel("Time (s)")
     plt.ylabel("Voltage ($V_e$)")
 
-    # Place legend outside to avoid obscuring data
     plt.legend(bbox_to_anchor=(1.02, 1), loc="upper left", borderaxespad=0.0)
 
     plt.grid(True, alpha=0.3, linestyle="--")
@@ -199,14 +192,14 @@ def plot_simulation_graph(file_path):
         print(f"Error: File not found at {file_path}")
         return
 
-    # ================== 1. LOAD DATA ==================
+
     graph_data = None
     graph_uuid = "unknown"
 
-    # CASE A: Input is the Simulation (.h5)
+
     if path_obj.suffix == ".h5":
         try:
-            # load_trajectory=False makes it fast
+
             data = load_simulation_data(file_path, graph=True, load_trajectory=False)
             graph_data = data.get("graph")
             graph_uuid = data.get("graph_uuid", "unknown")
@@ -214,23 +207,23 @@ def plot_simulation_graph(file_path):
             print(f"Error loading .h5: {e}")
             return
 
-    # CASE B: Input is the Graph itself (.npz)
+
     elif path_obj.suffix == ".npz":
         try:
-            # Load directly
-            raw_data = np.load(str(path_obj))
-            graph_data = dict(raw_data)  # Convert to dict
 
-            # The .npz usually contains the UUID inside (see generate_config.py)
+            raw_data = np.load(str(path_obj))
+            graph_data = dict(raw_data)  
+
+
             if "uuid" in graph_data:
                 uuid_val = graph_data["uuid"]
-                # Decode if bytes (common in numpy str saving)
+
                 if isinstance(uuid_val, bytes):
                     graph_uuid = uuid_val.decode("utf-8")
                 else:
                     graph_uuid = str(uuid_val)
             else:
-                # If not inside, grab from filename as fallback
+
                 graph_uuid = path_obj.stem.split("_")[-1]
 
         except Exception as e:
@@ -258,13 +251,13 @@ def plot_simulation_graph(file_path):
     active_pos = graph_data["positions"]
     passive_counts = graph_data["passive_counts"]
 
-    # Fix Shape if (2, N) -> (N, 2)
+
     if active_pos.shape[0] == 2 and active_pos.shape[1] > 2:
         active_pos = active_pos.T
 
     num_active = len(active_pos)
 
-    # Build NetworkX Graph
+
     G = nx.Graph()
     active_indices = list(range(num_active))
     G.add_nodes_from(active_indices, type="active")
@@ -296,7 +289,7 @@ def plot_simulation_graph(file_path):
 
     G.add_edges_from(passive_edges, type="passive_link")
 
-    # ================== 3. PLOTTING ==================
+    # ==================  PLOTTING ==================
     plt.figure(figsize=(12, 12))
     ax = plt.gca()
 
@@ -350,8 +343,8 @@ def plot_simulation_graph(file_path):
         f"Graph Topology\nUUID: {graph_uuid} | Active: {num_active} | Passive: {len(passive_indices)}"
     )
 
-    ax.set_aspect("equal")  # Correct aspect ratio
-    ax.axis("off")  # Hide axis
+    ax.set_aspect("equal")  
+    ax.axis("off") 
     plt.legend(loc="upper right")
     plt.tight_layout()
     plt.show()
@@ -375,12 +368,11 @@ def animate_simulation(file_path, fps=30, steps_per_second=2000):
     params = data["parameters"]
 
     # 2. Calculate optimal skipping
-    # To see waves, we need to skip enough steps to move through time quickly
     step_skip = int(steps_per_second / fps)
     if step_skip < 1:
         step_skip = 1
 
-    # Extract Voltage (Variable 0)
+
     voltages = trajectory[::step_skip, 0, :]
     pos = graph_data["positions"]
     if pos.shape[0] == 2:
@@ -411,11 +403,9 @@ def animate_simulation(file_path, fps=30, steps_per_second=2000):
     ax.axis("off")
     title = ax.set_title("Initializing Waves...")
 
-    # 5. Update Function (Fixed for readability)
+    # 5. Update Function
     def update(frame):
         scatter.set_array(voltages[frame, :])
-
-        # Calculate real simulation time
         current_time = frame * step_skip * dt
         current_step = frame * step_skip
         title.set_text(f"Sim Time: {current_time:.2f}s | Step: {current_step}")
@@ -423,7 +413,6 @@ def animate_simulation(file_path, fps=30, steps_per_second=2000):
         return (scatter,)
 
     # 6. Execute Animation
-    # interval = 1000 / fps ensures the video plays at the desired speed
     ani = animation.FuncAnimation(
         fig, update, frames=n_frames, interval=int(1000 / fps), blit=False, repeat=True
     )
@@ -432,20 +421,19 @@ def animate_simulation(file_path, fps=30, steps_per_second=2000):
     return ani
 
 
-def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
+def animate_with_tracer(file_path, fps=30, steps_per_second=4000):
     """
     Advanced animation with a clickable node tracer.
     """
     # 1. Load Data
     data = load_simulation_data(file_path, graph=True, load_trajectory=True)
-    trajectory = data["trajectory"]  # Shape: (Time, Variables, Nodes)
+    trajectory = data["trajectory"]  
     pos = data["graph"]["positions"]
     params = data["parameters"]
 
     if pos.shape[0] == 2:
         pos = pos.T
 
-    # Pre-build a KDTree for lightning-fast click detection
     tree = KDTree(pos)
 
     # 2. Timing and Slicing
@@ -456,7 +444,7 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
 
     v_min, v_max = np.min(voltages), np.max(voltages)
 
-    # 3. Setup Figure (2 Columns: Animation | Time Series)
+    # 3. Setup Figure 
     fig = plt.figure(figsize=(15, 7))
     ax_sim = fig.add_subplot(121)
     ax_trace = fig.add_subplot(122)
@@ -477,7 +465,7 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
     ax_sim.axis("off")
     title = ax_sim.set_title("Click a node to trace")
 
-    # Trace Plot (Initialize with Node 0)
+    # Trace Plot
     current_node = 0
     (line,) = ax_trace.plot(
         full_time_axis, trajectory[:, 0, current_node], color="crimson", lw=1.5
@@ -495,11 +483,10 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
         if event.inaxes != ax_sim:
             return
 
-        # Find nearest node to the click
+
         dists, idx = tree.query([event.xdata, event.ydata])
         current_node = idx
 
-        # Update the line data for the new node
         line.set_ydata(trajectory[:, 0, current_node])
         ax_trace.set_title(f"Voltage Trace: Node {current_node}")
         fig.canvas.draw_idle()
@@ -508,10 +495,8 @@ def animate_with_tracer(file_path, fps=30, steps_per_second=2000):
 
     # 5. Animation Update
     def update(frame):
-        # Update spatial colors
         scatter.set_array(voltages[frame, :])
 
-        # Update time marker in the trace plot
         current_time = frame * step_skip * dt
         time_marker.set_xdata([current_time])
 
@@ -535,7 +520,6 @@ def parse_columns(df):
     """
     metrics = {}
 
-    # Regex to match "metric_name_lag123"
     pattern = re.compile(r"(.+)_lag(\d+)$")
 
     for col in df.columns:
@@ -557,13 +541,11 @@ def plot_phase_scan(df, metrics_map, output_prefix):
     """
     print(">>> Detected PHASE SCAN mode (Multiple Epsilons).")
 
-    # Sort by epsilon for clean lines
     df = df.sort_values(by="epsilon")
 
     for metric_name, lag_dict in metrics_map.items():
         plt.figure(figsize=(10, 6))
 
-        # Plot a line for each Lag available
         sorted_lags = sorted(lag_dict.keys())
         for lag in sorted_lags:
             col = lag_dict[lag]
@@ -588,18 +570,17 @@ def plot_time_evolution(df, metrics_map, output_prefix):
     """
     print(">>> Detected TIME EVOLUTION mode (Single/Few Epsilons).")
 
-    # If multiple rows exist (e.g. multiple epsilons), we plot one line per row
+
     for idx, row in df.iterrows():
         eps = row.get("epsilon", "unknown")
 
-        # Create one plot per metric (KL, CCA, MSE)
         for metric_name, lag_dict in metrics_map.items():
             lags = sorted(lag_dict.keys())
             values = [row[lag_dict[lag]] for lag in lags]
 
             plt.figure(figsize=(10, 6))
 
-            # Main Line
+
             plt.plot(
                 lags,
                 values,
@@ -609,12 +590,7 @@ def plot_time_evolution(df, metrics_map, output_prefix):
                 label=rf"$\epsilon={eps}$",
             )
 
-            # Theoretical embellishments for specific metrics
             if "cca" in metric_name.lower():
-                # plt.axhline(
-                #    1.0, color="black", linestyle="--", label="Perfect Alignment"
-                # )
-                # plt.ylim(0, 1.1)
                 pass
             elif "kl" in metric_name.lower():
                 plt.axhline(0.0, color="black", linestyle="--", label="Zero Divergence")
@@ -651,8 +627,7 @@ def main():
         return
 
     # 2. Determine Plot Mode
-    # If we have many epsilon points (>3), it's likely a sweep.
-    # If we have 1 or 2 epsilons, it's likely a proof run.
+
     unique_eps = df["epsilon"].nunique() if "epsilon" in df.columns else 0
 
     output_prefix = os.path.splitext(csv_path)[0]
@@ -663,5 +638,140 @@ def main():
         plot_time_evolution(df, metrics_map, output_prefix)
 
 
+def animate_with_tracer_FFT(file_path, fps=30, steps_per_second=4000):
+    """
+    Animation avec :
+    1. Graphe du réseau (gauche)
+    2. Tracé temporel du nœud cliqué (milieu)
+    3. Spectre FFT du nœud sélectionné (droite)
+    """
+    # 1. Chargement des données
+    data = load_simulation_data(file_path, graph=True, load_trajectory=True)
+    trajectory = data["trajectory"]  
+    pos = data["graph"]["positions"]
+    params = data["parameters"]
+
+    if pos.shape[0] == 2:
+        pos = pos.T
+
+    # 2. Configuration temporelle
+    dt = float(params.get("dt", 0.01))
+    step_skip = max(1, int(steps_per_second / fps))
+    voltages = trajectory[::step_skip, 0, :]  
+    full_time_axis = np.arange(trajectory.shape[0]) * dt
+    n_time_full = trajectory.shape[0]
+
+    # 3. Pré-calcul des FFT pour tous les nœuds (optimisation)
+    X_centered = trajectory[:, 0, :] - np.mean(trajectory[:, 0, :], axis=0)
+    fft_spectrum = np.fft.rfft(X_centered, axis=0)
+    power_spectrum = np.abs(fft_spectrum)**2
+    freqs = np.fft.rfftfreq(n_time_full, d=dt)
+
+    # 4. Configuration de la figure (3 colonnes)
+    fig = plt.figure(figsize=(18, 7))
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 0.8])
+
+    # 4.1. Graphe du réseau (gauche)
+    ax_sim = fig.add_subplot(gs[0])
+    scatter = ax_sim.scatter(
+        pos[:, 0], pos[:, 1],
+        c=voltages[0, :],
+        cmap="magma",
+        s=40, edgecolors="black", linewidths=0.2,
+        vmin=np.min(voltages), vmax=np.max(voltages)
+    )
+    ax_sim.set_aspect("equal")
+    ax_sim.axis("off")
+    ax_sim.set_title("Réseau - Cliquez sur un nœud")
+
+    # 4.2. Tracé temporel (milieu)
+    ax_trace = fig.add_subplot(gs[1])
+    current_node = 0
+    (line,) = ax_trace.plot([], [], color="crimson", lw=1.5)
+    time_marker = ax_trace.axvline(0, color="black", linestyle="--", alpha=0.5)
+    ax_trace.set_title(f"Série temporelle : Nœud {current_node}")
+    ax_trace.set_xlabel("Temps (s)")
+    ax_trace.set_ylabel("Potentiel")
+    ax_trace.grid(True, alpha=0.3)
+
+    # 4.3. Spectre FFT (droite)
+    ax_fft = fig.add_subplot(gs[2])
+    (fft_line,) = ax_fft.plot([], [], color="darkblue", lw=2)
+    ax_fft.set_title(f"Spectre FFT : Nœud {current_node}")
+    ax_fft.set_xlabel("Fréquence (Hz)")
+    ax_fft.set_ylabel("Puissance")
+    ax_fft.grid(True, alpha=0.3)
+    ax_fft.set_xlim(0, 50)  # Limite à 50Hz (ajustable)
+
+    # 5. Logique de clic interactif
+    tree = KDTree(pos)
+    def on_click(event):
+        nonlocal current_node
+        if event.inaxes != ax_sim:
+            return
+        dists, idx = tree.query([event.xdata, event.ydata])
+        current_node = idx
+        update_node_data(current_node)
+        fig.canvas.draw_idle()
+
+    fig.canvas.mpl_connect("button_press_event", on_click)
+
+    # 6. Fonction de mise à jour des données
+    def update_node_data(node_idx):
+        # Mise à jour du tracé temporel
+        line.set_data(full_time_axis, trajectory[:, 0, node_idx])
+        ax_trace.set_title(f"Série temporelle : Nœud {node_idx}")
+        ax_trace.relim()
+        ax_trace.autoscale_view()
+
+        # Mise à jour de la FFT
+        node_power = power_spectrum[:, node_idx]
+        node_freqs = freqs
+        fft_line.set_data(node_freqs, node_power)
+        ax_fft.set_title(f"Spectre FFT : Nœud {node_idx}")
+
+        # Détection des oscillations
+        is_osc, peak_freq = detect_oscillating_nodes(
+            trajectory[:, 0, node_idx].reshape(-1, 1),
+            params,
+            min_power=1e8,  
+            f_min=0.00005
+        )
+
+        # Annotations sur le spectre
+        if is_osc[0]:
+            ax_fft.axvline(peak_freq[0], color="red", linestyle="--",
+                          label=f"Pic: {peak_freq[0]:.2f} Hz")
+            ax_fft.legend()
+        else:
+            ax_fft.set_title(f"Spectre FFT : Nœud {node_idx} (Non oscillant)")
+
+        ax_fft.relim()
+        ax_fft.autoscale_view()
+
+    # 7. Initialisation
+    update_node_data(current_node)
+
+    # 8. Animation
+    def animate(frame):
+        scatter.set_array(voltages[frame, :])
+        current_time = frame * step_skip * dt
+        time_marker.set_xdata([current_time, current_time])
+
+        return scatter, line, time_marker, fft_line
+
+    # Calcul du nombre de frames
+    n_frames = voltages.shape[0]
+    ani = animation.FuncAnimation(
+        fig, animate, frames=n_frames,
+        interval=1000/fps, blit=False
+    )
+
+    plt.tight_layout()
+    plt.show()
+    return ani
+
+
 if __name__ == "__main__":
-    main()
+    plot_simulation_graph("/Users/constantindeumier/Desktop/Dev_Numerical_project/pass/Numerical_Project/run/Data_output/20260101-164453_simulation_optimal_linear_cr_epsilon/ts_N1000_Coup0.250_cr1.000_G-unknown.h5")
+    animate_with_tracer_FFT("/Users/constantindeumier/Desktop/Dev_Numerical_project/pass/Numerical_Project/run/Data_output/20260104-100620_simulation_optimal_linear_cr_epsilon/ts_N1000_Coup0.800_cr1.200_G-unknown.h5")

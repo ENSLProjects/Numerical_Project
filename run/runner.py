@@ -1,78 +1,59 @@
 #!/usr/bin/env python3
 
 # ======================= Libraries
-
-
 import os
-import yaml
 import sys
-
+import fcntl
+import numpy as np
+import traceback 
 
 # ======================= ADAPTIVE ENVIRONMENT CONFIGURATION =======================
-# We must detect the 'parallel' flag and set env vars BEFORE importing numpy/bnn_package.
-
-# Detect Parallel Mode from Config
-# We do this early to set environment variables before 'numpy' loads.
-config_path_env = "run/configs/config_phase_scan.yaml"
-if len(sys.argv) > 1:
-    config_path_env = sys.argv[1]
-
-use_parallel_env = False
-if os.path.exists(config_path_env):
-    try:
-        with open(config_path_env, "r") as f:
-            # Quick parse to avoid full load overhead in workers
-            cfg_env = yaml.safe_load(f)
-            use_parallel_env = cfg_env.get("parallel", False)
-    except Exception:
-        pass
-
-# Apply Environment Optimizations
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
 os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+os.environ["LOKY_MAX_CPU_COUNT"] = "1"
+os.environ["JOBLIB_MULTIPROCESSING"] = "0"
 
-if use_parallel_env:
-    # OPTIMIZATION: Force single-threaded algebra for parallel workers
-    # This prevents 100 threads fighting for 6 cores.
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-    os.environ["NUMEXPR_NUM_THREADS"] = "1"
-    # FIX: Prevent sklearn from spawning nested pools
-    os.environ["LOKY_MAX_CPU_COUNT"] = "1"
-    os.environ["JOBLIB_MULTIPROCESSING"] = "0"
-else:
-    # SEQUENTIAL MODE: Allow MKL/BLAS to use all cores
-    # We do not set the variables, letting libraries auto-detect max cores.
-    pass
-
-# it is fair to import now but Ruff is complaining with the PEP8 rule to import before calling
-
-import itertools  # noqa: E402
-import multiprocessing  # noqa: E402
-import time  # noqa: E402
-import shutil  # noqa: E402
-import uuid  # noqa: E402
-from tqdm import tqdm  # noqa: E402
-from bnn_package import (  # noqa: E402
-    save_result,
-    load_config,
-    corrupted_simulation,  # noqa: F401
+# ======================= IMPORTS =======================
+import itertools
+import multiprocessing
+from multiprocessing import shared_memory
+import time
+import shutil
+import uuid
+from tqdm import tqdm
+from bnn_package import save_result, load_config, generate_poisson_input
+from workers import (
+    run_order_parameter, time_series, 
+    research_alignment_worker_2, 
+    research_alignment_worker_TE_tensor, 
+    init_worker_globals,
+    worker_wrapper
 )
-from workers import run_order_parameter, time_series, research_alignment_worker  # noqa: E402
+from workers import _global_graph, _global_passive_counts, _global_input_signal
 
 
-# ======================= Functions
+# Mappage complet : on couvre les noms de config ET les noms de fonctions possibles
+MODE_MAP = {
 
+    "time_series": time_series,
+    "sweep": run_order_parameter,
+    "research_alignment": research_alignment_worker_2,
+    "TE": research_alignment_worker_TE_tensor,
+    "run_order_parameter": run_order_parameter,
+    "research_alignment_worker_2": research_alignment_worker_2
+}
 
+# ======================= Functions (Helpers) =======================
 def archive_graph(config, result_dir):
-    """Archiving Graph Logic."""
     source_path = config.get("existing_graph_path")
     if not source_path or not os.path.exists(source_path):
         if config.get("generate_graph", False):
             return None
         print("\n>>> CRITICAL ERROR: Graph file missing!")
-        print(f"    Path: {source_path}")
         sys.exit(1)
 
     print("\n>>> GRAPH PROVENANCE")
@@ -83,19 +64,14 @@ def archive_graph(config, result_dir):
     print(f"    Archived: {dest_path}")
     return dest_path
 
-
 def generate_tasks(config):
-    """Grid Search Generator."""
     fixed_params = {}
     sweep_keys = []
     sweep_values = []
 
-    # Parameters that should NOT be split into permutations
     NON_SWEEP = [
-        "square_for_graph",
-        "metrics",
-        "diffusive_operator",
-        "existing_graph_path",
+        "square_for_graph", "metrics", "diffusive_operator", 
+        "existing_graph_path", "forced_targets", "parallel", "cores_ratio", "output_file"
     ]
 
     for key, val in config.items():
@@ -115,12 +91,23 @@ def generate_tasks(config):
     return tasks, sweep_keys
 
 
-def main():
-    # --- LOAD CONFIG ---
-    config_path = "run/configs/config_phase_scan.yaml"
-    if len(sys.argv) > 1:
-        config_path = sys.argv[1]
 
+# ======================= MAIN =======================
+def main():
+
+
+
+    # --- ANTI-DOUBLE-LANCEMENT ---
+    lock_file = os.path.join("/tmp", f"phase_scan_{os.getpid()}.lock")
+    try:
+        fp = open(lock_file, "w")
+        fcntl.flock(fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except IOError:
+        print(f"⚠️  Un autre run est déjà en cours. Supprime {lock_file}.")
+        sys.exit(1)
+
+    # --- LOAD CONFIG ---
+    config_path = sys.argv[1] if len(sys.argv) > 1 else "run/configs/config_phase_scan.yaml"
     if not os.path.exists(config_path):
         print(f"Error: Config not found at {config_path}")
         return
@@ -131,41 +118,91 @@ def main():
     raw_name = os.path.splitext(os.path.basename(config_path))[0]
     run_uuid = str(uuid.uuid4())[:8]
     timestamp = time.strftime("%Y%m%d-%H%M%S")
-
     result_dir = os.path.join("Data_output", f"{timestamp}_{raw_name}")
     os.makedirs(result_dir, exist_ok=True)
-
     shutil.copy(config_path, os.path.join(result_dir, f"config_{run_uuid}.yaml"))
 
+    # --- CREATE INPUT LOCK FILE ---
+    input_signal = None
+    target_idxs = None
+
+    print(">>> Generating input signal...")
+    input_signal_generated, target_idxs = generate_poisson_input(
+        n_nodes=config["number_of_nodes"],
+        final_time=config["total_time"],
+        dt=config["dt"],
+        n_targets=config.get("input_targets", 1), 
+        rate_hz=config["input_rate"],
+        magnitude=config["input_magnitude"],
+        forced_targets=config.get("forced_targets", None), 
+        
+    )
+    print(f">>> Input signal generated. Shape: {input_signal_generated.shape}")
+
+    # --- PREPARE DATA ---
     graph_path = archive_graph(config, result_dir)
+    print(">>> Loading graph into memory (Main Process)...")
+    try:
+        with np.load(graph_path) as data:
+            shared_graph = data["adjacency"]      
+            position = data["positions"]      
+            n_nodes = data["n_nodes"]          
+            passive_counts = data["passive_counts"] if "passive_counts" in data else None
+        print(f">>> Graph loaded. Nodes: {n_nodes}, Passive Counts: {'Yes' if passive_counts is not None else 'No'}")
+    except Exception as e:
+        print(f"\n>>> ERROR LOADING GRAPH: {e}")
+        sys.exit(1)
+
+
+    # --- SHARED MEMORY ---
+    shm = shared_memory.SharedMemory(
+        create=True,
+        size=input_signal_generated.nbytes
+    )
+
+    shared_input = np.ndarray(
+        input_signal_generated.shape,
+        dtype=input_signal_generated.dtype,
+        buffer=shm.buf
+    )
+
+    shared_input[:] = input_signal_generated[:]
 
     # --- PREPARE TASKS ---
-    mode = config.get("mode", "sweep")
-    mode_map = {
-        "time_series": time_series,
-        "sweep": run_order_parameter,
-        "research_alignment": research_alignment_worker,
-    }
-
-    target_function = mode_map.get(mode, run_order_parameter)
-
     tasks, sweep_vars = generate_tasks(config)
-
+    run_mode = config.get("mode", "sweep")
+    
     for task in tasks:
-        task["output_folder"] = result_dir
-        task["run_id"] = run_uuid
-        task["graph_file_path"] = graph_path
+        task.update({
+            "output_folder": result_dir,
+            "run_id": run_uuid,
+            "graph_file_path": graph_path,
+            "mode": run_mode,
+            "forced_targets": target_idxs,   
+            "number_of_nodes": config["number_of_nodes"],
+            "total_time": config["total_time"],
+            "dt": config["dt"],
+            "input_rate": config["input_rate"],
+            "input_magnitude": config["input_magnitude"],
+            "preloaded_input_signal": input_signal_generated,
+            "target_indices": target_idxs,
+            "passive_counts": passive_counts,
+            "preloaded_graph": shared_graph,  
+            
+        })
+
 
     # --- EXECUTION ---
     use_parallel = config.get("parallel", False)
-    ratio_cpu = config.get("cores_ratio", 0.8)
-    n_cores = max(1, int(multiprocessing.cpu_count() * ratio_cpu))
-
+    ratio_cpu = config.get("cores_ratio", 0.5)
+    max_cores = int(multiprocessing.cpu_count() * ratio_cpu)
+    n_cores = min(10, max(1, max_cores)) 
+    
     output_file = os.path.join(result_dir, config.get("output_file", "results.csv"))
 
     print(f"\n{'=' * 60}")
     print(f">>> RUN ID:   {run_uuid}")
-    print(f"    Mode:     {mode}")
+    print(f"    Mode:     {run_mode}")
     print(f"    Sweeping: {sweep_vars}")
     print(f"    Tasks:    {len(tasks)}")
     print(f"    Parallel: {use_parallel} ({n_cores} cores)")
@@ -174,30 +211,52 @@ def main():
     start_time = time.time()
 
     if use_parallel:
-        print(">>> Starting Multiprocessing Pool...")
-        os.environ["OMP_NUM_THREADS"] = "1"
-        with multiprocessing.Pool(n_cores) as pool:
-            # imap_unordered + tqdm for real-time progress
-            results = list(
-                tqdm(
-                    pool.imap_unordered(target_function, tasks),
-                    total=len(tasks),
-                    unit="sim",
-                    ncols=80,
-                )
-            )
-            for i, res in enumerate(results):
-                save_result(res, i, output_file, mode)
+        print(">>> Starting Multiprocessing Pool (Optimized with Wrapper)...")
+        try:
+            with multiprocessing.Pool(
+                n_cores,
+                initializer=init_worker_globals,
+                initargs=(shared_graph, passive_counts, input_signal_generated)
+            ) as pool:
+
+                results_iterator = pool.imap_unordered(worker_wrapper, tasks)
+                
+                results = []
+                
+                print(">>> Saving results...")
+                valid_count = 0
+                for i, res in enumerate(tqdm(results_iterator, total=len(tasks), desc="Running simulations", ncols=80)):
+                    if res is not None:
+                        save_result(res, i, output_file, run_mode)
+                        valid_count += 1
+                
+                    else:
+                        print(f"\n!!! WARNING: Task {i} returned None. Check worker logs for errors. !!!")
+                print(f">>> Saved {valid_count}/{len(tasks)} results.")
+        except Exception as e:
+            print("\n>>> CRITICAL POOL ERROR:")
+            traceback.print_exc()
+            
     else:
         print(">>> Starting Sequential Loop...")
-        os.environ["OMP_NUM_THREADS"] = str(n_cores)
+        target_func = MODE_MAP.get(run_mode, run_order_parameter)
+
         for i, task in enumerate(tqdm(tasks, unit="sim", ncols=80)):
-            res = target_function(task)
-            save_result(res, i, output_file, mode)
+            task["preloaded_graph"] = shared_graph
+            task["passive_counts"] = passive_counts
+            task["input_signal"] = input_signal_generated 
+
+            try:
+                res = target_func(task)
+                save_result(res, i, output_file, run_mode)
+            except Exception as e:
+                print(f"Error in task {i}: {e}")
+                traceback.print_exc()
+
+
 
     print(f"\n>>> COMPLETED in {time.time() - start_time:.2f}s")
     print(f">>> Results in: {result_dir}")
-
 
 if __name__ == "__main__":
     main()
